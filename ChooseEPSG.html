@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>投影推荐器 - Choose EPSG</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/d3-geo-projection.v4.min.js"></script>
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <style>
+        .projection-btn {
+            transition: all 0.2s;
+        }
+        .projection-btn:hover {
+            transform: translateX(4px);
+        }
+        .projection-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: transparent;
+        }
+        .map-container {
+            background: linear-gradient(135deg, #1e3a5f 0%, #0d1b2a 100%);
+            border-radius: 12px;
+        }
+        .code-box {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+        .copy-btn.copied {
+            background: #10b981;
+            border-color: #10b981;
+        }
+        .land {
+            fill: #3b82f6;
+            stroke: #1e40af;
+            stroke-width: 0.5;
+        }
+        .sphere {
+            fill: none;
+            stroke: #60a5fa;
+            stroke-width: 0.5;
+            stroke-dasharray: 4, 4;
+        }
+        .graticule {
+            fill: none;
+            stroke: #374151;
+            stroke-width: 0.3;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        <h1 class="text-3xl font-bold text-center mb-2 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+            投影推荐器
+        </h1>
+        <p class="text-center text-slate-400 mb-8">根据您的需求自动推荐合适的地图投影</p>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- Left Panel - Input -->
+            <div class="lg:col-span-3 space-y-4">
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700">
+                        <h3 class="font-bold">参数设置</h3>
+                    </div>
+                    <div class="p-4 space-y-4">
+                        <div>
+                            <label class="text-xs text-slate-400 uppercase tracking-wider block mb-2">应用场景</label>
+                            <select id="use-case" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm">
+                                <option value="all">全部场景</option>
+                                <option value="world">世界地图</option>
+                                <option value="regional">区域地图</option>
+                                <option value="polar">极地地图</option>
+                                <option value="navigation">导航航海</option>
+                                <option value="equal-area">等面积展示</option>
+                                <option value="equal-distance">等距离展示</option>
+                                <option value="conformal">等角度展示</option>
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="text-xs text-slate-400 uppercase tracking-wider block mb-2">投影类型</label>
+                            <select id="projection-type" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm">
+                                <option value="all">全部类型</option>
+                                <option value="圆柱投影">圆柱投影</option>
+                                <option value="伪圆柱投影">伪圆柱投影</option>
+                                <option value="圆锥投影">圆锥投影</option>
+                                <option value="圆锥等面积投影">圆锥等面积投影</option>
+                                <option value="横轴墨卡托投影">横轴墨卡托投影</option>
+                                <option value="方位投影">方位投影</option>
+                                <option value="极地立体投影">极地立体投影</option>
+                                <option value="地理坐标系">地理坐标系</option>
+                            </select>
+                            <div id="projection-type-hint" class="mt-2 text-xs text-yellow-400 hidden">
+                                <span class="inline-block mr-1">⚠️</span>
+                                <span>圆柱/伪圆柱/地理坐标系应当保证中心点的纬度设置为0，否则地图会失真。</span>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="text-xs text-slate-400 uppercase tracking-wider block mb-2">中心点</label>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="text-xs text-slate-500 mb-1 block">经度</label>
+                                    <input type="number" id="center-lon" value="0" step="1" min="-180" max="180"
+                                           class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-slate-500 mb-1 block">纬度</label>
+                                    <input type="number" id="center-lat" value="0" step="1" min="-90" max="90"
+                                           class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label class="text-xs text-slate-400 uppercase tracking-wider block mb-2">覆盖范围 (可选)</label>
+                            <select id="coverage" class="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm">
+                                <option value="global">全球</option>
+                                <option value="hemisphere">半球</option>
+                                <option value="continent">大洲</option>
+                                <option value="country">国家</option>
+                                <option value="local">局部</option>
+                            </select>
+                        </div>
+                        
+                        <button id="recommend" class="w-full py-3 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg font-medium hover:opacity-90 transition">
+                            获取推荐投影
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700">
+                        <h3 class="font-bold">推荐投影列表</h3>
+                    </div>
+                    <div id="recommendation-list" class="max-h-[50vh] overflow-y-auto custom-scrollbar p-2 space-y-2">
+                        <p class="text-slate-400 text-sm text-center py-4">点击"获取推荐投影"查看结果</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Panel - Map Preview -->
+            <div class="lg:col-span-6 space-y-4">
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                        <div>
+                            <h2 id="projection-title" class="font-bold text-lg">选择投影预览</h2>
+                            <p id="projection-epsg" class="text-sm text-slate-400">请先获取推荐</p>
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <label class="flex items-center gap-2 text-sm">
+                                <input type="checkbox" id="show-graticule" checked class="rounded">
+                                <span class="text-slate-400">经纬网</span>
+                            </label>
+                            <label class="flex items-center gap-2 text-sm">
+                                <input type="checkbox" id="show-sphere" checked class="rounded">
+                                <span class="text-slate-400">球体轮廓</span>
+                            </label>
+                            <button id="reset-view" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors">
+                                显示全图
+                            </button>
+                        </div>
+                    </div>
+                    <div class="map-container h-[500px] relative">
+                        <svg id="map-svg"></svg>
+                    </div>
+                    <div class="px-4 py-3 border-t border-slate-700">
+                        <div class="grid grid-cols-3 gap-4 text-center text-sm">
+                            <div>
+                                <div class="text-slate-400">投影类型</div>
+                                <div id="display-projection-type" class="font-medium">-</div>
+                            </div>
+                            <div>
+                                <div class="text-slate-400">适用范围</div>
+                                <div id="projection-extent" class="font-medium">-</div>
+                            </div>
+                            <div>
+                                <div class="text-slate-400">单位</div>
+                                <div id="projection-units" class="font-medium">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel - Details -->
+            <div class="lg:col-span-3 space-y-4">
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700">
+                        <h3 class="font-bold">推荐理由</h3>
+                    </div>
+                    <div id="recommendation-reason" class="p-4 text-sm text-slate-300">
+                        <p>选择参数后点击"获取推荐投影"查看详细说明</p>
+                    </div>
+                </div>
+                
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                        <h3 class="font-bold">PROJ 字符串</h3>
+                        <button class="copy-btn px-3 py-1 text-xs border border-slate-600 rounded-lg" data-target="proj-content">
+                            复制
+                        </button>
+                    </div>
+                    <div class="p-4">
+                        <textarea id="proj-content" class="code-box w-full h-24 bg-slate-900 p-3 rounded-lg border border-slate-700 resize-none focus:ring-2 focus:ring-blue-500 outline-none" readonly></textarea>
+                    </div>
+                </div>
+
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                        <h3 class="font-bold">WKT 格式</h3>
+                        <button class="copy-btn px-3 py-1 text-xs border border-slate-600 rounded-lg" data-target="wkt-content">
+                            复制
+                        </button>
+                    </div>
+                    <div class="p-4">
+                        <textarea id="wkt-content" class="code-box w-full h-32 bg-slate-900 p-3 rounded-lg border border-slate-700 resize-none focus:ring-2 focus:ring-blue-500 outline-none" readonly></textarea>
+                    </div>
+                </div>
+                
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700">
+                        <h3 class="font-bold">使用此投影</h3>
+                    </div>
+                    <div class="p-4">
+                        <button id="use-projection" class="w-full py-2 bg-gradient-to-r from-green-500 to-emerald-600 rounded-lg font-medium hover:opacity-90 transition">
+                            在 EPSG 预览器中打开
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let worldData = null;
+        let currentProjection = null;
+        let currentZoom = null;
+
+        const projections = [
+            {
+                id: 'EPSG:3857',
+                name: 'Web Mercator',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext +no_defs',
+                wkt: 'PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext +no_defs"]]',
+                d3Projection: d3.geoMercator(),
+                originalD3Projection: d3.geoMercator(),
+                useCases: ['world', 'navigation'],
+                features: ['保持角度', '适合导航', 'Web地图标准']
+            },
+            {
+                id: 'EPSG:4326',
+                name: 'WGS 84',
+                category: 'world',
+                type: '地理坐标系',
+                extent: '全球',
+                units: '度',
+                proj: '+proj=longlat +datum=WGS84 +no_defs +type=crs',
+                wkt: 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4326"]]',
+                d3Projection: d3.geoEquirectangular(),
+                originalD3Projection: d3.geoEquirectangular(),
+                useCases: ['world', 'equal-distance'],
+                features: ['等距离', '简单直观', '数据存储标准']
+            },
+            {
+                id: 'ESRI:54009',
+                name: 'Mollweide',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=moll +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Mollweide",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Mollweide"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide(),
+                originalD3Projection: d3.geoMollweide(),
+                useCases: ['world', 'equal-area'],
+                features: ['等面积', '保持形状', '适合全球统计']
+            },
+            {
+                id: 'ESRI:54030',
+                name: 'Robinson',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Robinson",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Robinson"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoRobinson(),
+                originalD3Projection: d3.geoRobinson(),
+                useCases: ['world'],
+                features: ['平衡失真', '视觉美观', '适合世界地图']
+            },
+            {
+                id: 'ESRI:54035',
+                name: 'Equal Earth',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eqearth +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Equal_Earth",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Equal_Earth"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoEqualEarth(),
+                originalD3Projection: d3.geoEqualEarth(),
+                useCases: ['world', 'equal-area'],
+                features: ['等面积', '低角度失真', '现代投影']
+            },
+            {
+                id: 'ESRI:54022',
+                name: 'Albers Equal Area',
+                category: 'world',
+                type: '圆锥等面积投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=37.5 +lon_0=-96 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Albers",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Albers"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",-96],PARAMETER["Standard_Parallel_1",29.5],PARAMETER["Standard_Parallel_2",45.5],PARAMETER["Latitude_Of_Origin",37.5],UNIT["Meter",1]]',
+                d3Projection: d3.geoAlbers(),
+                originalD3Projection: d3.geoAlbers(),
+                useCases: ['regional', 'equal-area'],
+                features: ['等面积', '适合中纬度', '美国常用']
+            },
+            {
+                id: 'ESRI:54021',
+                name: 'Lambert Conformal Conic',
+                category: 'world',
+                type: '圆锥投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=lcc +lat_1=33 +lat_2=45 +lat_0=39 +lon_0=-96 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Lambert_Conformal_Conic",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",-96],PARAMETER["Standard_Parallel_1",33],PARAMETER["Standard_Parallel_2",45],PARAMETER["Latitude_Of_Origin",39],UNIT["Meter",1]]',
+                d3Projection: d3.geoConicConformal(),
+                originalD3Projection: d3.geoConicConformal(),
+                useCases: ['regional', 'conformal'],
+                features: ['保持角度', '适合中纬度', '法国标准']
+            },
+            {
+                id: 'ESRI:54003',
+                name: 'Azimuthal Equidistant',
+                category: 'world',
+                type: '方位投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=aeqd +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Azimuthal_Equidistant",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Azimuthal_Equidistant"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Latitude_Of_Origin",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoAzimuthalEquidistant(),
+                originalD3Projection: d3.geoAzimuthalEquidistant(),
+                useCases: ['regional', 'equal-distance'],
+                features: ['等距离', '从中心点辐射', '适合航空']
+            },
+            {
+                id: 'ESRI:54020',
+                name: 'Lambert Azimuthal Equal Area',
+                category: 'world',
+                type: '方位投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=laea +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Lambert_Azimuthal_Equal_Area",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Lambert_Azimuthal_Equal_Area"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Latitude_Of_Origin",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoAzimuthalEqualArea(),
+                originalD3Projection: d3.geoAzimuthalEqualArea(),
+                useCases: ['regional', 'equal-area'],
+                features: ['等面积', '从中心点辐射', '适合统计']
+            },
+            {
+                id: 'ESRI:102019',
+                name: 'South Pole Stereographic',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '南极地区',
+                units: '米',
+                proj: '+proj=stere +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["South_Pole_Stereographic",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Stereographic"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Scale_Factor",1],PARAMETER["Latitude_Of_Origin",-90],UNIT["Meter",1]]',
+                d3Projection: d3.geoStereographic().rotate([0, 90]),
+                originalD3Projection: d3.geoStereographic().rotate([0, 90]),
+                useCases: ['polar'],
+                features: ['保持角度', '极地专用', '适合南极研究']
+            },
+            {
+                id: 'ESRI:102020',
+                name: 'North Pole Stereographic',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '北极地区',
+                units: '米',
+                proj: '+proj=stere +lat_0=90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["North_Pole_Stereographic",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Stereographic"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Scale_Factor",1],PARAMETER["Latitude_Of_Origin",90],UNIT["Meter",1]]',
+                d3Projection: d3.geoStereographic().rotate([0, -90]),
+                originalD3Projection: d3.geoStereographic().rotate([0, -90]),
+                useCases: ['polar'],
+                features: ['保持角度', '极地专用', '适合北极研究']
+            },
+            {
+                id: 'EPSG:32649',
+                name: 'UTM Zone 49N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '108°E - 114°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=49 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 49N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",111],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1],AUTHORITY["EPSG","32649"]]',
+                d3Projection: d3.geoTransverseMercator(),
+                originalD3Projection: d3.geoTransverseMercator(),
+                useCases: ['regional', 'navigation'],
+                features: ['保持角度', '中国中部', 'UTM标准']
+            },
+            {
+                id: 'EPSG:4479',
+                name: 'CGCS2000 Albers',
+                category: 'national',
+                type: '圆锥等面积投影',
+                extent: '中国',
+                units: '米',
+                proj: '+proj=aea +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["CGCS2000 / Albers",GEOGCS["China Geodetic Coordinate System 2000",DATUM["China_2000",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Albers"],PARAMETER["standard_parallel_1",25],PARAMETER["standard_parallel_2",47],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",105],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoAlbers().parallels([25, 47]),
+                originalD3Projection: d3.geoAlbers().parallels([25, 47]),
+                useCases: ['regional', 'equal-area', 'national'],
+                features: ['等面积', '中国标准', '适合全国地图']
+            },
+            {
+                id: 'EPSG:2154',
+                name: 'Lambert-93',
+                category: 'national',
+                type: '圆锥投影',
+                extent: '法国',
+                units: '米',
+                proj: '+proj=lcc +lat_1=49 +lat_2=44 +lat_0=46.5 +lon_0=3 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0,0 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["RGF93 v1 / Lambert-93",GEOGCS["RGF93 v1",DATUM["Reseau_Geodesique_Francais_1993_v1",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",46.5],PARAMETER["central_meridian",3],PARAMETER["standard_parallel_1",49],PARAMETER["standard_parallel_2",44],PARAMETER["false_easting",700000],PARAMETER["false_northing",6600000],UNIT["metre",1],AUTHORITY["EPSG","2154"]]',
+                d3Projection: d3.geoConicConformal().parallels([44, 49]),
+                originalD3Projection: d3.geoConicConformal().parallels([44, 49]),
+                useCases: ['regional', 'conformal', 'national'],
+                features: ['保持角度', '法国标准', '高精度']
+            },
+            {
+                id: 'EPSG:27700',
+                name: 'British National Grid',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '英国',
+                units: '米',
+                proj: '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["OSGB36 / British National Grid",GEOGCS["OSGB36",DATUM["Ordnance_Survey_of_Great_Britain_1936",SPHEROID["Airy 1830",6377563.396,299.3249646]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",49],PARAMETER["central_meridian",-2],PARAMETER["scale_factor",0.9996012717],PARAMETER["false_easting",400000],PARAMETER["false_northing",-100000],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator(),
+                originalD3Projection: d3.geoTransverseMercator(),
+                useCases: ['regional', 'navigation', 'national'],
+                features: ['保持角度', '英国标准', '高精度']
+            },
+            {
+                id: 'EPSG:2163',
+                name: 'US National Atlas Equal Area',
+                category: 'national',
+                type: '方位投影',
+                extent: '美国',
+                units: '米',
+                proj: '+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 +a=6370997 +b=6370997 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["US National Atlas Equal Area",GEOGCS["Unspecified datum based upon Clarke 1866 Authalic Sphere",DATUM["Not_specified_based_on_Clarke_1866_Authalic_Sphere",SPHEROID["Clarke 1866 Authalic Sphere",6370997,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Azimuthal_Equal_Area"],PARAMETER["latitude_of_center",45],PARAMETER["longitude_of_center",-100],UNIT["metre",1]]',
+                d3Projection: d3.geoAzimuthalEqualArea(),
+                originalD3Projection: d3.geoAzimuthalEqualArea(),
+                useCases: ['regional', 'equal-area', 'national'],
+                features: ['等面积', '美国标准', '适合全国地图']
+            },
+            {
+                id: 'EPSG:3413',
+                name: 'NSIDC Polar Stereographic North',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '北极海冰区域',
+                units: '米',
+                proj: '+proj=stere +lat_0=90 +lat_ts=70 +lon_0=-45 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / NSIDC Sea Ice Polar Stereographic North",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Polar_Stereographic"],PARAMETER["latitude_of_origin",70],PARAMETER["central_meridian",-45],UNIT["metre",1]]',
+                d3Projection: d3.geoStereographic(),
+                originalD3Projection: d3.geoStereographic(),
+                useCases: ['polar'],
+                features: ['保持角度', '北极海冰', 'NSIDC标准']
+            }
+        ];
+
+        async function init() {
+            try {
+                const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+                worldData = await response.json();
+            } catch (error) {
+                console.error('Failed to load world data:', error);
+            }
+
+            setupEventListeners();
+        }
+
+        function setupEventListeners() {
+            document.getElementById('recommend').addEventListener('click', recommendProjections);
+            document.getElementById('show-graticule').addEventListener('change', renderMap);
+            document.getElementById('show-sphere').addEventListener('change', renderMap);
+            document.getElementById('use-projection').addEventListener('click', useInEPSGViewer);
+            document.getElementById('reset-view').addEventListener('click', resetView);
+            document.getElementById('center-lon').addEventListener('change', updateProjectionStrings);
+            document.getElementById('center-lat').addEventListener('change', updateProjectionStrings);
+            document.getElementById('projection-type').addEventListener('change', updateProjectionTypeHint);
+            
+            document.querySelectorAll('.copy-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const target = document.getElementById(btn.dataset.target);
+                    navigator.clipboard.writeText(target.value).then(() => {
+                        btn.classList.add('copied');
+                        btn.textContent = '已复制';
+                        setTimeout(() => {
+                            btn.classList.remove('copied');
+                            btn.textContent = '复制';
+                        }, 2000);
+                    });
+                });
+            });
+        }
+
+        function updateProjectionStrings() {
+            if (!currentProjection) return;
+            
+            const centerLon = parseFloat(document.getElementById('center-lon').value) || 0;
+            const centerLat = parseFloat(document.getElementById('center-lat').value) || 0;
+            
+            let projString = currentProjection.proj;
+            let wktString = currentProjection.wkt;
+            
+            projString = projString.replace(/\+lon_0=[-+]?\d*\.?\d*/i, `+lon_0=${centerLon}`);
+            projString = projString.replace(/\+lat_0=[-+]?\d*\.?\d*/i, `+lat_0=${centerLat}`);
+            
+            wktString = wktString.replace(/central_meridian["\s]*,[\s]*[-+]?\d*\.?\d*/i, `central_meridian", ${centerLon}`);
+            wktString = wktString.replace(/latitude_of_origin["\s]*,[\s]*[-+]?\d*\.?\d*/i, `latitude_of_origin", ${centerLat}`);
+            wktString = wktString.replace(/Central_Meridian["\s]*,[\s]*[-+]?\d*\.?\d*/i, `Central_Meridian", ${centerLon}`);
+            wktString = wktString.replace(/Latitude_Of_Origin["\s]*,[\s]*[-+]?\d*\.?\d*/i, `Latitude_Of_Origin", ${centerLat}`);
+            
+            document.getElementById('proj-content').value = projString;
+            document.getElementById('wkt-content').value = wktString;
+            
+            let d3Proj;
+            if (currentProjection.id.includes('102019') || currentProjection.id.includes('102020')) {
+                d3Proj = currentProjection.d3Projection;
+            } else {
+                d3Proj = currentProjection.d3Projection;
+                if (centerLon !== 0 || centerLat !== 0) {
+                    d3Proj = currentProjection.d3Projection.rotate([-centerLon, -centerLat]);
+                }
+            }
+            
+            currentProjection.d3Projection = d3Proj;
+            
+            renderMap();
+        }
+
+        function updateProjectionTypeHint() {
+            const projectionType = document.getElementById('projection-type').value;
+            const hintDiv = document.getElementById('projection-type-hint');
+            
+            if (projectionType === '圆柱投影' || projectionType === '伪圆柱投影' || projectionType === '地理坐标系') {
+                hintDiv.classList.remove('hidden');
+            } else {
+                hintDiv.classList.add('hidden');
+            }
+        }
+
+        function recommendProjections() {
+            const useCase = document.getElementById('use-case').value;
+            const projectionType = document.getElementById('projection-type').value;
+            const centerLon = parseFloat(document.getElementById('center-lon').value) || 0;
+            const centerLat = parseFloat(document.getElementById('center-lat').value) || 0;
+            const coverage = document.getElementById('coverage').value;
+
+            let recommendations = [];
+
+            if (useCase === 'all') {
+                recommendations = [...projections];
+            } else if (useCase === 'world') {
+                recommendations = projections.filter(p => p.useCases.includes('world'));
+            } else if (useCase === 'regional') {
+                recommendations = projections.filter(p => p.useCases.includes('regional'));
+            } else if (useCase === 'polar') {
+                recommendations = projections.filter(p => p.useCases.includes('polar'));
+            } else if (useCase === 'navigation') {
+                recommendations = projections.filter(p => p.useCases.includes('navigation'));
+            } else if (useCase === 'equal-area') {
+                recommendations = projections.filter(p => p.useCases.includes('equal-area'));
+            } else if (useCase === 'equal-distance') {
+                recommendations = projections.filter(p => p.useCases.includes('equal-distance'));
+            } else if (useCase === 'conformal') {
+                recommendations = projections.filter(p => p.useCases.includes('conformal'));
+            }
+
+            if (projectionType !== 'all') {
+                recommendations = recommendations.filter(p => p.type === projectionType);
+            }
+
+            if (coverage === 'local') {
+                recommendations = recommendations.filter(p => p.category === 'utm' || p.category === 'national');
+            }
+
+            if (Math.abs(centerLat) > 60) {
+                recommendations = recommendations.filter(p => p.category === 'polar' || p.id.includes('Pole'));
+            }
+
+            if (centerLon >= 100 && centerLon <= 120 && centerLat >= 20 && centerLat <= 50) {
+                const chinaProjections = recommendations.filter(p => p.id.includes('4479') || p.id.includes('3264'));
+                if (chinaProjections.length > 0) {
+                    chinaProjections.forEach(p => p.priority = 10);
+                    recommendations = chinaProjections.concat(recommendations.filter(p => !p.id.includes('4479') && !p.id.includes('3264')));
+                }
+            }
+
+            recommendations = recommendations.slice(0, 8);
+
+            renderRecommendations(recommendations);
+        }
+
+        function renderRecommendations(recommendations) {
+            const list = document.getElementById('recommendation-list');
+            
+            if (recommendations.length === 0) {
+                list.innerHTML = '<p class="text-slate-400 text-sm text-center py-4">未找到匹配的投影</p>';
+                return;
+            }
+
+            list.innerHTML = recommendations.map((p, index) => `
+                <button class="projection-btn w-full text-left px-3 py-2 rounded-lg border border-slate-600 text-sm hover:border-blue-500 ${index === 0 ? 'active' : ''}" 
+                        data-id="${p.id}">
+                    <div class="font-medium">${p.name}</div>
+                    <div class="text-xs opacity-70">${p.id}</div>
+                    <div class="text-xs text-blue-400 mt-1">${p.features.join(' · ')}</div>
+                </button>
+            `).join('');
+
+            list.querySelectorAll('.projection-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const proj = projections.find(p => p.id === btn.dataset.id);
+                    if (proj) {
+                        selectProjection(proj);
+                        list.querySelectorAll('.projection-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                    }
+                });
+            });
+
+            if (recommendations.length > 0) {
+                selectProjection(recommendations[0]);
+            }
+        }
+
+        function selectProjection(proj) {
+            currentProjection = proj;
+            
+            const centerLon = parseFloat(document.getElementById('center-lon').value) || 0;
+            const centerLat = parseFloat(document.getElementById('center-lat').value) || 0;
+            
+            let projString = proj.proj;
+            let wktString = proj.wkt;
+            
+            projString = projString.replace(/\+lon_0=[-+]?\d*\.?\d*/i, `+lon_0=${centerLon}`);
+            projString = projString.replace(/\+lat_0=[-+]?\d*\.?\d*/i, `+lat_0=${centerLat}`);
+            
+            wktString = wktString.replace(/central_meridian["\s]*,[\s]*[-+]?\d*\.?\d*/i, `central_meridian", ${centerLon}`);
+            wktString = wktString.replace(/latitude_of_origin["\s]*,[\s]*[-+]?\d*\.?\d*/i, `latitude_of_origin", ${centerLat}`);
+            wktString = wktString.replace(/Central_Meridian["\s]*,[\s]*[-+]?\d*\.?\d*/i, `Central_Meridian", ${centerLon}`);
+            wktString = wktString.replace(/Latitude_Of_Origin["\s]*,[\s]*[-+]?\d*\.?\d*/i, `Latitude_Of_Origin", ${centerLat}`);
+            
+            let d3Proj;
+            const hasCenterPoint = centerLon !== 0 || centerLat !== 0;
+            
+            if (proj.id.includes('102019')) {
+                d3Proj = d3.geoStereographic().rotate([0, 90]);
+            } else if (proj.id.includes('102020')) {
+                d3Proj = d3.geoStereographic().rotate([0, -90]);
+            } else if (proj.id === 'EPSG:3857') {
+                d3Proj = d3.geoMercator();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'EPSG:4326') {
+                d3Proj = d3.geoEquirectangular();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'ESRI:54009') {
+                d3Proj = d3.geoMollweide();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'ESRI:54030') {
+                d3Proj = d3.geoRobinson();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'ESRI:54035') {
+                d3Proj = d3.geoEqualEarth();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'ESRI:54022') {
+                d3Proj = d3.geoAlbers();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'ESRI:54021') {
+                d3Proj = d3.geoConicConformal();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'ESRI:54003') {
+                d3Proj = d3.geoAzimuthalEquidistant();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'ESRI:54020') {
+                d3Proj = d3.geoAzimuthalEqualArea();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'EPSG:32649') {
+                d3Proj = d3.geoTransverseMercator();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'EPSG:4479') {
+                d3Proj = d3.geoAlbers().parallels([25, 47]);
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'EPSG:2154') {
+                d3Proj = d3.geoConicConformal().parallels([44, 49]);
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'EPSG:27700') {
+                d3Proj = d3.geoTransverseMercator();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'EPSG:2163') {
+                d3Proj = d3.geoAzimuthalEqualArea();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else if (proj.id === 'EPSG:3413') {
+                d3Proj = d3.geoStereographic();
+                if (hasCenterPoint) {
+                    d3Proj = d3Proj.rotate([-centerLon, -centerLat]);
+                }
+            } else {
+                d3Proj = proj.originalD3Projection;
+            }
+            
+            currentProjection.d3Projection = d3Proj;
+            
+            document.getElementById('projection-title').textContent = proj.name;
+            document.getElementById('projection-epsg').textContent = proj.id;
+            document.getElementById('display-projection-type').textContent = proj.type;
+            document.getElementById('projection-extent').textContent = proj.extent;
+            document.getElementById('projection-units').textContent = proj.units;
+            document.getElementById('proj-content').value = projString;
+            document.getElementById('wkt-content').value = wktString;
+            
+            const reasonDiv = document.getElementById('recommendation-reason');
+            reasonDiv.innerHTML = `
+                <div class="space-y-3">
+                    <div>
+                        <div class="font-medium text-blue-400 mb-1">推荐理由</div>
+                        <ul class="list-disc list-inside space-y-1 text-slate-300">
+                            ${proj.features.map(f => `<li>${f}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <div>
+                        <div class="font-medium text-green-400 mb-1">适用场景</div>
+                        <p class="text-slate-300">${proj.useCases.map(c => {
+                            const map = {
+                                'world': '世界地图',
+                                'regional': '区域地图',
+                                'polar': '极地地图',
+                                'navigation': '导航航海',
+                                'equal-area': '等面积展示',
+                                'equal-distance': '等距离展示',
+                                'conformal': '等角度展示'
+                            };
+                            return map[c] || c;
+                        }).join('、')}</p>
+                    </div>
+                </div>
+            `;
+
+            renderMap();
+        }
+
+        function renderMap() {
+            if (!currentProjection || !worldData) return;
+
+            const svg = d3.select('#map-svg');
+            const container = svg.node().parentElement;
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            svg.attr('width', width).attr('height', height);
+            svg.selectAll('*').remove();
+
+            let scale;
+            const centerLon = parseFloat(document.getElementById('center-lon').value) || 0;
+            const centerLat = parseFloat(document.getElementById('center-lat').value) || 0;
+            
+            if (currentProjection.category === 'polar') {
+                scale = Math.min(width, height) / 2.5;
+            } else if (currentProjection.type.includes('方位投影')) {
+                scale = Math.min(width, height) / 3;
+            } else if (currentProjection.type.includes('圆柱') || currentProjection.type.includes('伪圆柱')) {
+                scale = Math.min(width, height) / 1.8;
+            } else {
+                scale = Math.min(width, height) / 2;
+            }
+
+            const projection = currentProjection.d3Projection
+                .translate([width / 2, height / 2])
+                .scale(scale);
+
+            const path = d3.geoPath().projection(projection);
+
+            const g = svg.append('g').attr('class', 'map-group');
+
+            if (document.getElementById('show-sphere').checked) {
+                const sphere = { type: 'Sphere' };
+                g.append('path')
+                    .datum(sphere)
+                    .attr('class', 'sphere')
+                    .attr('d', path);
+            }
+
+            let landPath = null;
+            if (worldData) {
+                const land = topojson.feature(worldData, worldData.objects.countries);
+                landPath = g.append('path')
+                    .datum(land)
+                    .attr('class', 'land')
+                    .attr('d', path);
+            }
+
+            if (document.getElementById('show-graticule').checked) {
+                const graticule = d3.geoGraticule();
+                g.append('path')
+                    .datum(graticule())
+                    .attr('class', 'graticule')
+                    .attr('d', path);
+            }
+
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 10])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                });
+
+            svg.call(zoom);
+            currentZoom = zoom;
+            
+            if (landPath) {
+                const bounds = landPath.node().getBBox();
+                const padding = 20;
+                const scaleX = (width - padding * 2) / bounds.width;
+                const scaleY = (height - padding * 2) / bounds.height;
+                const fitScale = Math.min(scaleX, scaleY, 1);
+                
+                const centerX = bounds.x + bounds.width / 2;
+                const centerY = bounds.y + bounds.height / 2;
+                const translateX = width / 2 - centerX * fitScale;
+                const translateY = height / 2 - centerY * fitScale;
+                
+                svg.transition().duration(300).call(
+                    zoom.transform,
+                    d3.zoomIdentity.translate(translateX, translateY).scale(fitScale)
+                );
+            }
+        }
+
+        function resetView() {
+            if (!currentProjection || !worldData) return;
+
+            const svg = d3.select('#map-svg');
+            const g = svg.select('.map-group');
+            
+            svg.transition().duration(750).call(
+                currentZoom.transform,
+                d3.zoomIdentity
+            );
+            
+            setTimeout(() => {
+                renderMap();
+            }, 750);
+        }
+
+        function useInEPSGViewer() {
+            if (!currentProjection) return;
+            const url = `EPSG.html?epsg=${encodeURIComponent(currentProjection.id)}`;
+            window.open(url, '_blank');
+        }
+
+        init();
+    </script>
+</body>
+</html>

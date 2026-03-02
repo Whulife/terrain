@@ -1,0 +1,1892 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地图投影预览器 - EPSG Code Explorer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://d3js.org/d3-geo-projection.v4.min.js"></script>
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
+    <style>
+        .projection-btn {
+            transition: all 0.2s;
+        }
+        .projection-btn:hover {
+            transform: translateX(4px);
+        }
+        .projection-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: transparent;
+        }
+        .map-container {
+            background: linear-gradient(135deg, #1e3a5f 0%, #0d1b2a 100%);
+            border-radius: 12px;
+        }
+        .code-box {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .copy-btn {
+            transition: all 0.2s;
+        }
+        .copy-btn:hover {
+            background: #4f46e5;
+            color: white;
+        }
+        .copy-btn.copied {
+            background: #10b981;
+            color: white;
+        }
+        #map-svg {
+            width: 100%;
+            height: 100%;
+        }
+        .graticule {
+            fill: none;
+            stroke: rgba(255,255,255,0.1);
+            stroke-width: 0.5px;
+        }
+        .land {
+            fill: #2dd4bf;
+            stroke: #0d9488;
+            stroke-width: 0.5px;
+        }
+        .sphere {
+            fill: rgba(30, 58, 95, 0.3);
+            stroke: rgba(255,255,255,0.2);
+            stroke-width: 1px;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 min-h-screen text-white">
+    <div class="container mx-auto p-4 md:p-8">
+        <!-- Header -->
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                🗺️ 地图投影预览器
+            </h1>
+            <p class="text-slate-400 mt-2">探索不同EPSG投影坐标系，预览世界地图变形效果</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- Left Panel - Projection List -->
+            <div class="lg:col-span-3">
+                <div class="bg-slate-800 rounded-xl p-4 border border-slate-700">
+                    <div class="mb-4">
+                        <input type="text" id="search-input" placeholder="搜索投影名称或EPSG代码..." 
+                               class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="text-xs text-slate-400 uppercase tracking-wider">分类方式</label>
+                        <select id="filter-mode" class="w-full mt-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm">
+                            <option value="category">按区域分类</option>
+                            <option value="type">按投影类型分类</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="text-xs text-slate-400 uppercase tracking-wider" id="filter-label">投影分类</label>
+                        <select id="category-filter" class="w-full mt-1 px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm">
+                            <option value="all">全部投影</option>
+                            <option value="world">世界投影</option>
+                            <option value="utm">UTM投影</option>
+                            <option value="national">国家/地区投影</option>
+                            <option value="polar">极地投影</option>
+                            <option value="custom">自定义投影</option>
+                        </select>
+                    </div>
+
+                    <div class="text-xs text-slate-400 mb-2 uppercase tracking-wider">投影列表</div>
+                    <div id="projection-list" class="space-y-1 max-h-[60vh] overflow-y-auto custom-scrollbar pr-2">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Panel - Map Preview -->
+            <div class="lg:col-span-6">
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                        <div>
+                            <h2 id="projection-title" class="font-bold text-lg">WGS 84 / Pseudo-Mercator</h2>
+                            <p id="projection-epsg" class="text-sm text-slate-400">EPSG:3857</p>
+                        </div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <div class="flex items-center gap-1 text-sm">
+                                <label class="text-slate-400">中心经度:</label>
+                                <input type="number" id="center-lon" value="0" step="1" min="-180" max="180" 
+                                       class="w-16 px-1 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs">
+                            </div>
+                            <div class="flex items-center gap-1 text-sm">
+                                <label class="text-slate-400">中心纬度:</label>
+                                <input type="number" id="center-lat" value="0" step="1" min="-90" max="90" 
+                                       class="w-16 px-1 py-0.5 bg-slate-700 border border-slate-600 rounded text-xs">
+                            </div>
+                            <label class="flex items-center gap-2 text-sm">
+                                <input type="checkbox" id="show-graticule" checked class="rounded">
+                                <span class="text-slate-400">经纬网</span>
+                            </label>
+                            <label class="flex items-center gap-2 text-sm">
+                                <input type="checkbox" id="show-sphere" checked class="rounded">
+                                <span class="text-slate-400">球体轮廓</span>
+                            </label>
+                            <button id="reset-zoom" class="px-3 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
+                                重置缩放
+                            </button>
+                            <button id="export-png" class="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">
+                                导出PNG
+                            </button>
+                            <button id="export-svg" class="px-3 py-1 text-xs bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors">
+                                导出SVG
+                            </button>
+                        </div>
+                    </div>
+                    <div class="map-container h-[500px] relative">
+                        <svg id="map-svg"></svg>
+                        <div id="error-message" class="absolute inset-0 flex items-center justify-center text-red-400 hidden">
+                            <div class="text-center p-4">
+                                <p class="text-lg mb-2">⚠️ 投影错误</p>
+                                <p id="error-text" class="text-sm"></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="px-4 py-3 border-t border-slate-700">
+                        <div class="grid grid-cols-3 gap-4 text-center text-sm">
+                            <div>
+                                <div class="text-slate-400">投影类型</div>
+                                <div id="projection-type" class="font-medium">圆柱投影</div>
+                            </div>
+                            <div>
+                                <div class="text-slate-400">适用范围</div>
+                                <div id="projection-extent" class="font-medium">全球</div>
+                            </div>
+                            <div>
+                                <div class="text-slate-400">单位</div>
+                                <div id="projection-units" class="font-medium">米</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel - Code Display -->
+            <div class="lg:col-span-3 space-y-4">
+                <!-- WKT -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                        <h3 class="font-bold">WKT 格式</h3>
+                        <button class="copy-btn px-3 py-1 text-xs border border-slate-600 rounded-lg" data-target="wkt-content">
+                            复制
+                        </button>
+                    </div>
+                    <div class="p-4">
+                        <textarea id="wkt-content" class="code-box w-full h-40 bg-slate-900 p-3 rounded-lg border border-slate-700 resize-none focus:ring-2 focus:ring-blue-500 outline-none" readonly></textarea>
+                    </div>
+                </div>
+
+                <!-- PROJ -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                        <h3 class="font-bold">PROJ 字符串</h3>
+                        <button class="copy-btn px-3 py-1 text-xs border border-slate-600 rounded-lg" data-target="proj-content">
+                            复制
+                        </button>
+                    </div>
+                    <div class="p-4">
+                        <textarea id="proj-content" class="code-box w-full h-32 bg-slate-900 p-3 rounded-lg border border-slate-700 resize-none focus:ring-2 focus:ring-blue-500 outline-none" readonly></textarea>
+                    </div>
+                </div>
+
+                <!-- Custom Input -->
+                <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-slate-700">
+                        <h3 class="font-bold">自定义投影</h3>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        <div>
+                            <label class="text-xs text-slate-400 mb-1 block">PROJ 字符串</label>
+                            <textarea id="custom-proj" class="code-box w-full h-20 bg-slate-900 p-3 rounded-lg border border-slate-700 resize-none focus:ring-2 focus:ring-blue-500 outline-none" placeholder="+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"></textarea>
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-400 mb-1 block">WKT 字符串 (可选)</label>
+                            <textarea id="custom-wkt" class="code-box w-full h-20 bg-slate-900 p-3 rounded-lg border border-slate-700 resize-none focus:ring-2 focus:ring-blue-500 outline-none" placeholder="PROJCS[&quot;WGS 84 / World Mercator&quot;,...]"></textarea>
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-400 mb-1 block">投影名称</label>
+                            <input type="text" id="custom-name" class="w-full bg-slate-900 p-2 rounded-lg border border-slate-700 focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="我的自定义投影">
+                        </div>
+                        <button id="apply-custom" class="w-full py-2 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg font-medium hover:opacity-90 transition">
+                            应用自定义投影
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="mt-8 text-center text-slate-500 text-sm">
+            <p>数据来源: EPSG Registry | 使用 D3.js 和 Proj4js 实现</p>
+        </footer>
+    </div>
+
+    <script>
+        // 投影数据定义
+        const projections = [
+            {
+                id: 'EPSG:3857',
+                name: 'WGS 84 / Pseudo-Mercator',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球 (85.06°S - 85.06°N)',
+                units: '米',
+                proj: '+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / Pseudo-Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],EXTENSION["PROJ4","+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs"],AUTHORITY["EPSG","3857"]]',
+                d3Projection: d3.geoMercator()
+            },
+            {
+                id: 'EPSG:4326',
+                name: 'WGS 84',
+                category: 'world',
+                type: '地理坐标系',
+                extent: '全球',
+                units: '度',
+                proj: '+proj=longlat +datum=WGS84 +no_defs +type=crs',
+                wkt: 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'EPSG:3395',
+                name: 'WGS 84 / World Mercator',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球 (80°S - 84°N)',
+                units: '米',
+                proj: '+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / World Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",0],PARAMETER["scale_factor",1],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","3395"]]',
+                d3Projection: d3.geoMercator()
+            },
+            {
+                id: 'EPSG:54001',
+                name: 'World Plate Carree',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World Plate Carree",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Equirectangular"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",0],UNIT["metre",1]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'ESRI:54009',
+                name: 'Mollweide',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=moll +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Mollweide",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Mollweide"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54008',
+                name: 'Sinusoidal',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Sinusoidal",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Sinusoidal"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoSinusoidal()
+            },
+            {
+                id: 'ESRI:54030',
+                name: 'Robinson',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Robinson",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Robinson"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoRobinson()
+            },
+            {
+                id: 'ESRI:54002',
+                name: 'Equidistant Cylindrical',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Equidistant_Cylindrical",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Equidistant_Cylindrical"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Standard_Parallel_1",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'ESRI:54034',
+                name: 'Winkel Tripel',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=wintri +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Winkel_Tripel",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Winkel_Tripel"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoWinkel3()
+            },
+            {
+                id: 'ESRI:54026',
+                name: 'Cylindrical Equal Area',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=cea +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Cylindrical_Equal_Area",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Cylindrical_Equal_Area"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Standard_Parallel_1",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoCylindricalEqualArea()
+            },
+            {
+                id: 'ESRI:54042',
+                name: 'Goode Homolosine',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=igh +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Goode_Homolosine",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Goode_Homolosine"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoHomolosine()
+            },
+            {
+                id: 'EPSG:32650',
+                name: 'WGS 84 / UTM zone 50N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '114°E - 120°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=50 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 50N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",117],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","32650"]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-117, 0])
+            },
+            {
+                id: 'EPSG:32651',
+                name: 'WGS 84 / UTM zone 51N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '120°E - 126°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=51 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 51N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",123],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","32651"]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-123, 0])
+            },
+            {
+                id: 'EPSG:4547',
+                name: 'CGCS2000 / 3-degree Gauss-Kruger zone 39',
+                category: 'national',
+                type: '高斯-克吕格投影',
+                extent: '中国 117°E中央经线',
+                units: '米',
+                proj: '+proj=tmerc +lat_0=0 +lon_0=117 +k=1 +x_0=500000 +y_0=0 +ellps=GRS80 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["CGCS2000 / 3-degree Gauss-Kruger zone 39",GEOGCS["China Geodetic Coordinate System 2000",DATUM["China_2000",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","1043"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4490"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",117],PARAMETER["scale_factor",1],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AUTHORITY["EPSG","4547"]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-117, 0])
+            },
+            {
+                id: 'EPSG:2436',
+                name: 'Beijing 1954 / 3-degree Gauss-Kruger zone 38',
+                category: 'national',
+                type: '高斯-克吕格投影',
+                extent: '中国 114°E中央经线',
+                units: '米',
+                proj: '+proj=tmerc +lat_0=0 +lon_0=114 +k=1 +x_0=500000 +y_0=0 +ellps=krass +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Beijing 1954 / 3-degree Gauss-Kruger zone 38",GEOGCS["Beijing 1954",DATUM["Beijing_1954",SPHEROID["Krassowsky 1940",6378245,298.3,AUTHORITY["EPSG","7024"]],AUTHORITY["EPSG","6214"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4214"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",114],PARAMETER["scale_factor",1],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AUTHORITY["EPSG","2436"]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-114, 0])
+            },
+            {
+                id: 'EPSG:27700',
+                name: 'OSGB 1936 / British National Grid',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '英国',
+                units: '米',
+                proj: '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["OSGB 1936 / British National Grid",GEOGCS["OSGB 1936",DATUM["OSGB_1936",SPHEROID["Airy 1830",6377563.396,299.3249646,AUTHORITY["EPSG","7001"]],AUTHORITY["EPSG","6277"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4277"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",49],PARAMETER["central_meridian",-2],PARAMETER["scale_factor",0.9996012717],PARAMETER["false_easting",400000],PARAMETER["false_northing",-100000],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","27700"]]',
+                d3Projection: d3.geoTransverseMercator().rotate([2, 0]).center([0, 49])
+            },
+            {
+                id: 'EPSG:2154',
+                name: 'RGF93 v1 / Lambert-93',
+                category: 'national',
+                type: '兰伯特等角圆锥投影',
+                extent: '法国',
+                units: '米',
+                proj: '+proj=lcc +lat_1=49 +lat_2=44 +lat_0=46.5 +lon_0=3 +x_0=700000 +y_0=6600000 +ellps=GRS80 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["RGF93 v1 / Lambert-93",GEOGCS["RGF93 v1",DATUM["Reseau_Geodesique_Francais_1993_v1",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","6171"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4171"]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",46.5],PARAMETER["central_meridian",3],PARAMETER["standard_parallel_1",49],PARAMETER["standard_parallel_2",44],PARAMETER["false_easting",700000],PARAMETER["false_northing",6600000],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","2154"]]',
+                d3Projection: d3.geoConicConformal().parallels([44, 49]).rotate([-3, 0])
+            },
+            {
+                id: 'EPSG:2163',
+                name: 'US National Atlas Equal Area',
+                category: 'national',
+                type: '兰伯特等面积方位投影',
+                extent: '美国',
+                units: '米',
+                proj: '+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["US National Atlas Equal Area",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Lambert_Azimuthal_Equal_Area"],PARAMETER["latitude_of_center",45],PARAMETER["longitude_of_center",-100],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AUTHORITY["EPSG","2163"]]',
+                d3Projection: d3.geoAzimuthalEqualArea().rotate([100, -45])
+            },
+            {
+                id: 'EPSG:102016',
+                name: 'North Pole Lambert Azimuthal Equal Area',
+                category: 'polar',
+                type: '方位投影',
+                extent: '北极地区',
+                units: '米',
+                proj: '+proj=laea +lat_0=90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["North Pole Lambert Azimuthal Equal Area",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Azimuthal_Equal_Area"],PARAMETER["latitude_of_center",90],PARAMETER["longitude_of_center",0],UNIT["metre",1]]',
+                d3Projection: d3.geoAzimuthalEqualArea().rotate([0, -90])
+            },
+            {
+                id: 'EPSG:3995',
+                name: 'WGS 84 / Arctic Polar Stereographic',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '北极地区',
+                units: '米',
+                proj: '+proj=stere +lat_0=90 +lat_ts=71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / Arctic Polar Stereographic",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Polar_Stereographic"],PARAMETER["latitude_of_origin",71],PARAMETER["central_meridian",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",SOUTH],AXIS["Northing",SOUTH],AUTHORITY["EPSG","3995"]]',
+                d3Projection: d3.geoStereographic().rotate([0, -90])
+            },
+            {
+                id: 'EPSG:3031',
+                name: 'WGS 84 / Antarctic Polar Stereographic',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '南极地区',
+                units: '米',
+                proj: '+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / Antarctic Polar Stereographic",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]],PROJECTION["Polar_Stereographic"],PARAMETER["latitude_of_origin",-71],PARAMETER["central_meridian",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Easting",NORTH],AXIS["Northing",NORTH],AUTHORITY["EPSG","3031"]]',
+                d3Projection: d3.geoStereographic().rotate([0, 90])
+            },
+            {
+                id: 'ESRI:102018',
+                name: 'South Pole Azimuthal Equidistant',
+                category: 'polar',
+                type: '方位投影',
+                extent: '南极地区',
+                units: '米',
+                proj: '+proj=aeqd +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["South_Pole_Azimuthal_Equidistant",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Azimuthal_Equidistant"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Latitude_Of_Origin",-90],UNIT["Meter",1]]',
+                d3Projection: d3.geoAzimuthalEquidistant().rotate([0, 90])
+            },
+            {
+                id: 'ESRI:54017',
+                name: 'Behrmann',
+                category: 'world',
+                type: '圆柱等面积投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=cea +lat_ts=30 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Behrmann",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Cylindrical_Equal_Area"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Standard_Parallel_1",30],UNIT["Meter",1]]',
+                d3Projection: d3.geoCylindricalEqualArea().parallel(30)
+            },
+            {
+                id: 'ESRI:54029',
+                name: 'Van Der Grinten I',
+                category: 'world',
+                type: '混合投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=vandg +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["VanDerGrinten_I",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["VanDerGrinten"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoVanDerGrinten()
+            },
+            {
+                id: 'ESRI:54092',
+                name: 'Patterson',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=patterson +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Patterson",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Patterson"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoNaturalEarth1()
+            },
+            {
+                id: 'ESRI:54028',
+                name: 'Polyconic',
+                category: 'world',
+                type: '圆锥投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=poly +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Polyconic",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Polyconic"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Latitude_Of_Origin",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoConicConformal().rotate([0, 0])
+            },
+            {
+                id: 'ESRI:54043',
+                name: 'Times',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=tmerc +lat_0=0 +lon_0=0 +k=0.9996 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Times",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Transverse_Mercator"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Scale_Factor",0.9996],UNIT["Meter",1]]',
+                d3Projection: d3.geoNaturalEarth2()
+            },
+            {
+                id: 'ESRI:54035',
+                name: 'Equal Earth',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eqearth +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Equal_Earth",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Equal_Earth"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoEqualEarth()
+            },
+            {
+                id: 'ESRI:54012',
+                name: 'Eckert IV',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Eckert_IV",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Eckert_IV"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoEckert4()
+            },
+            {
+                id: 'ESRI:54011',
+                name: 'Eckert III',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eck3 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Eckert_III",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Eckert_III"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54010',
+                name: 'Eckert II',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eck2 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Eckert_II",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Eckert_II"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'ESRI:54018',
+                name: 'Hammer Eckert',
+                category: 'world',
+                type: '方位投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=hammer +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Hammer_Eckert",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Hammer_Aitoff"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoHammer()
+            },
+            {
+                id: 'ESRI:54046',
+                name: 'Natural Earth II',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=natearth2 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Natural_Earth_II",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Natural_Earth_II"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoNaturalEarth2()
+            },
+            {
+                id: 'ESRI:54032',
+                name: 'Loximuthal',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=loxim +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Loximuthal",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Loximuthal"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Central_Parallel",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'ESRI:54021',
+                name: 'Gall Stereographic',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=gall +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Gall_Stereographic",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Gall_Stereographic"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMercator()
+            },
+            {
+                id: 'ESRI:54003',
+                name: 'Boggs Eumorphic',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=boggs +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Boggs_Eumorphic",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Boggs_Eumorphic"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'EPSG:32649',
+                name: 'WGS 84 / UTM zone 49N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '108°E - 114°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=49 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 49N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",111],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-111, 0])
+            },
+            {
+                id: 'EPSG:32652',
+                name: 'WGS 84 / UTM zone 52N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '126°E - 132°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=52 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 52N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",129],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-129, 0])
+            },
+            {
+                id: 'EPSG:32633',
+                name: 'WGS 84 / UTM zone 33N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '12°E - 18°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 33N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",15],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-15, 0])
+            },
+            {
+                id: 'EPSG:32750',
+                name: 'WGS 84 / UTM zone 50S',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '114°E - 120°E, 南半球',
+                units: '米',
+                proj: '+proj=utm +zone=50 +south +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 50S",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",117],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",10000000],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-117, 0])
+            },
+            {
+                id: 'EPSG:6668',
+                name: 'JGD2011 / Japan Plane Rectangular CS I',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '日本',
+                units: '米',
+                proj: '+proj=tmerc +lat_0=33 +lon_0=129.5 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["JGD2011 / Japan Plane Rectangular CS I",GEOGCS["JGD2011",DATUM["Japanese_Geodetic_Datum_2011",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",33],PARAMETER["central_meridian",129.5],PARAMETER["scale_factor",0.9999],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-129.5, 0])
+            },
+            {
+                id: 'EPSG:28355',
+                name: 'GDA94 / MGA zone 55',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '澳大利亚东部',
+                units: '米',
+                proj: '+proj=utm +zone=55 +south +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["GDA94 / MGA zone 55",GEOGCS["GDA94",DATUM["Geocentric_Datum_of_Australia_1994",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",147],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",10000000],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-147, 0])
+            },
+            {
+                id: 'EPSG:2958',
+                name: 'NAD83(CSRS) / UTM zone 10N',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '加拿大西部',
+                units: '米',
+                proj: '+proj=utm +zone=10 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["NAD83(CSRS) / UTM zone 10N",GEOGCS["NAD83(CSRS)",DATUM["NAD83_Canadian_Spatial_Reference_System",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-123],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([123, 0])
+            },
+            {
+                id: 'EPSG:25832',
+                name: 'ETRS89 / UTM zone 32N',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '欧洲中部',
+                units: '米',
+                proj: '+proj=utm +zone=32 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["ETRS89 / UTM zone 32N",GEOGCS["ETRS89",DATUM["European_Terrestrial_Reference_System_1989",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",9],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-9, 0])
+            },
+            {
+                id: 'EPSG:4479',
+                name: 'CGCS2000 / Albers',
+                category: 'national',
+                type: '阿尔伯斯等面积圆锥投影',
+                extent: '中国',
+                units: '米',
+                proj: '+proj=aea +lat_1=25 +lat_2=47 +lat_0=0 +lon_0=105 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["CGCS2000 / Albers",GEOGCS["China Geodetic Coordinate System 2000",DATUM["China_2000",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Albers"],PARAMETER["standard_parallel_1",25],PARAMETER["standard_parallel_2",47],PARAMETER["latitude_of_center",0],PARAMETER["longitude_of_center",105],PARAMETER["false_easting",0],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoAlbers().parallels([25, 47]).rotate([-105, 0])
+            },
+            {
+                id: 'EPSG:2382',
+                name: 'Indian 1960 / UTM zone 48N',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '越南',
+                units: '米',
+                proj: '+proj=utm +zone=48 +a=6377276.345 +b=6356075.41314024 +towgs84=198,881,317,0,0,0,0 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Indian 1960 / UTM zone 48N",GEOGCS["Indian 1960",DATUM["Indian_1960",SPHEROID["Everest_1830_1937_Adjustment",6377276.345,300.8017]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",105],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-105, 0])
+            },
+            {
+                id: 'EPSG:24047',
+                name: 'Indian 1975 / UTM zone 47N',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '泰国',
+                units: '米',
+                proj: '+proj=utm +zone=47 +a=6377276.345 +b=6356075.41314024 +towgs84=210,814,289,0,0,0,0 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Indian 1975 / UTM zone 47N",GEOGCS["Indian 1975",DATUM["Indian_1975",SPHEROID["Everest_1830_1937_Adjustment",6377276.345,300.8017]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",99],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-99, 0])
+            },
+            {
+                id: 'EPSG:2044',
+                name: 'WGS 72BE / UTM zone 54N',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '韩国',
+                units: '米',
+                proj: '+proj=utm +zone=54 +ellps=WGS72 +towgs84=0,0,1.9,0,0,0.814,-0.38 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 72BE / UTM zone 54N",GEOGCS["WGS 72BE",DATUM["WGS_1972_Transit_Broadcast_Ephemeris",SPHEROID["WGS 72",6378135,298.26]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",141],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-141, 0])
+            },
+            {
+                id: 'EPSG:32601',
+                name: 'WGS 84 / UTM zone 1N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '180°W - 174°W, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=1 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 1N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-177],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([177, 0])
+            },
+            {
+                id: 'EPSG:32660',
+                name: 'WGS 84 / UTM zone 60N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '174°E - 180°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=60 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 60N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",177],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-177, 0])
+            },
+            {
+                id: 'EPSG:5041',
+                name: 'WGS 84 / UPS North',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '北极地区',
+                units: '米',
+                proj: '+proj=stere +lat_0=90 +lat_ts=90 +lon_0=0 +k=0.994 +x_0=2000000 +y_0=2000000 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UPS North",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Polar_Stereographic"],PARAMETER["latitude_of_origin",90],PARAMETER["central_meridian",0],PARAMETER["scale_factor",0.994],PARAMETER["false_easting",2000000],PARAMETER["false_northing",2000000],UNIT["metre",1]]',
+                d3Projection: d3.geoStereographic().rotate([0, -90])
+            },
+            {
+                id: 'EPSG:5042',
+                name: 'WGS 84 / UPS South',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '南极地区',
+                units: '米',
+                proj: '+proj=stere +lat_0=-90 +lat_ts=-90 +lon_0=0 +k=0.994 +x_0=2000000 +y_0=2000000 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UPS South",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Polar_Stereographic"],PARAMETER["latitude_of_origin",-90],PARAMETER["central_meridian",0],PARAMETER["scale_factor",0.994],PARAMETER["false_easting",2000000],PARAMETER["false_northing",2000000],UNIT["metre",1]]',
+                d3Projection: d3.geoStereographic().rotate([0, 90])
+            },
+            {
+                id: 'ESRI:102021',
+                name: 'South Pole Stereographic',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '南极地区',
+                units: '米',
+                proj: '+proj=stere +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["South_Pole_Stereographic",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Stereographic"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Scale_Factor",1],PARAMETER["Latitude_Of_Origin",-90],UNIT["Meter",1]]',
+                d3Projection: d3.geoStereographic().rotate([0, 90])
+            },
+            {
+                id: 'ESRI:102017',
+                name: 'North Pole Stereographic',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '北极地区',
+                units: '米',
+                proj: '+proj=stere +lat_0=90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["North_Pole_Stereographic",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Stereographic"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Scale_Factor",1],PARAMETER["Latitude_Of_Origin",90],UNIT["Meter",1]]',
+                d3Projection: d3.geoStereographic().rotate([0, -90])
+            },
+            {
+                id: 'EPSG:3413',
+                name: 'WGS 84 / NSIDC Sea Ice Polar Stereographic North',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '北极海冰区域',
+                units: '米',
+                proj: '+proj=stere +lat_0=90 +lat_ts=70 +lon_0=-45 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / NSIDC Sea Ice Polar Stereographic North",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Polar_Stereographic"],PARAMETER["latitude_of_origin",70],PARAMETER["central_meridian",-45],UNIT["metre",1]]',
+                d3Projection: d3.geoStereographic().rotate([45, -90])
+            },
+            {
+                id: 'EPSG:3976',
+                name: 'WGS 84 / NSIDC Sea Ice Polar Stereographic South',
+                category: 'polar',
+                type: '极地立体投影',
+                extent: '南极海冰区域',
+                units: '米',
+                proj: '+proj=stere +lat_0=-90 +lat_ts=-70 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / NSIDC Sea Ice Polar Stereographic South",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Polar_Stereographic"],PARAMETER["latitude_of_origin",-70],PARAMETER["central_meridian",0],UNIT["metre",1]]',
+                d3Projection: d3.geoStereographic().rotate([0, 90])
+            },
+            {
+                id: 'ESRI:54002',
+                name: 'Equidistant Cylindrical',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Equidistant_Cylindrical",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Equidistant_Cylindrical"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Standard_Parallel_1",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'ESRI:54034',
+                name: 'Cylindrical Equal Area',
+                category: 'world',
+                type: '圆柱等面积投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=cea +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Cylindrical_Equal_Area",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Cylindrical_Equal_Area"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Standard_Parallel_1",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoCylindricalEqualArea()
+            },
+            {
+                id: 'ESRI:54007',
+                name: 'Miller Cylindrical',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=mill +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +R_A +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Miller_Cylindrical",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Miller_Cylindrical"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMiller()
+            },
+            {
+                id: 'ESRI:54009',
+                name: 'Mollweide',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=moll +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Mollweide",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Mollweide"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54008',
+                name: 'Sinusoidal',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Sinusoidal",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Sinusoidal"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoNaturalEarth1()
+            },
+            {
+                id: 'ESRI:54005',
+                name: 'Eckert I',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eck1 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Eckert_I",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Eckert_I"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'ESRI:54006',
+                name: 'Eckert II',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eck2 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Eckert_II",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Eckert_II"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54013',
+                name: 'Eckert V',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eck5 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Eckert_V",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Eckert_V"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54014',
+                name: 'Eckert VI',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eck6 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Eckert_VI",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Eckert_VI"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54030',
+                name: 'Robinson',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Robinson",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Robinson"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoRobinson()
+            },
+            {
+                id: 'ESRI:54031',
+                name: 'Collignon',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=collg +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Collignon",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Collignon"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54042',
+                name: 'Goode Homolosine',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=igh +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Goode_Homolosine",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Goode_Homolosine"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54044',
+                name: 'Wagner IV',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=wag4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Wagner_IV",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Wagner_IV"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54045',
+                name: 'Wagner V',
+                category: 'world',
+                type: '伪圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=wag5 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Wagner_V",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Wagner_V"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMollweide()
+            },
+            {
+                id: 'ESRI:54040',
+                name: 'Wagner VII',
+                category: 'world',
+                type: '方位投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=wag7 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Wagner_VII",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Wagner_VII"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoAzimuthalEqualArea()
+            },
+            {
+                id: 'ESRI:54026',
+                name: 'Bonne',
+                category: 'world',
+                type: '圆锥投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=bonne +lon_0=0 +lat_1=60 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Bonne",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Bonne"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Standard_Parallel_1",60],UNIT["Meter",1]]',
+                d3Projection: d3.geoConicConformal()
+            },
+            {
+                id: 'ESRI:54022',
+                name: 'Albers',
+                category: 'world',
+                type: '圆锥等面积投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=37.5 +lon_0=-96 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Albers",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Albers"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",-96],PARAMETER["Standard_Parallel_1",29.5],PARAMETER["Standard_Parallel_2",45.5],PARAMETER["Latitude_Of_Origin",37.5],UNIT["Meter",1]]',
+                d3Projection: d3.geoAlbers()
+            },
+            {
+                id: 'ESRI:54024',
+                name: 'Bipolar Oblique Conic Conformal',
+                category: 'world',
+                type: '圆锥投影',
+                extent: '美洲',
+                units: '米',
+                proj: '+proj=bipc +ns +lon_0=-90 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Bipolar_Oblique_Conic_Conformal",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Bipolar_Oblique_Conic_Conformal"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoConicConformal()
+            },
+            {
+                id: 'ESRI:102019',
+                name: 'South Pole Lambert Azimuthal Equal Area',
+                category: 'polar',
+                type: '方位投影',
+                extent: '南极地区',
+                units: '米',
+                proj: '+proj=laea +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["South_Pole_Lambert_Azimuthal_Equal_Area",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Lambert_Azimuthal_Equal_Area"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Latitude_Of_Origin",-90],UNIT["Meter",1]]',
+                d3Projection: d3.geoAzimuthalEqualArea().rotate([0, 90])
+            },
+            {
+                id: 'ESRI:102020',
+                name: 'North Pole Gnomonic',
+                category: 'polar',
+                type: '方位投影',
+                extent: '北极地区',
+                units: '米',
+                proj: '+proj=gnom +lat_0=90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["North_Pole_Gnomonic",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Gnomonic"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Latitude_Of_Origin",90],UNIT["Meter",1]]',
+                d3Projection: d3.geoGnomonic().rotate([0, -90])
+            },
+            {
+                id: 'ESRI:102022',
+                name: 'South Pole Gnomonic',
+                category: 'polar',
+                type: '方位投影',
+                extent: '南极地区',
+                units: '米',
+                proj: '+proj=gnom +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["South_Pole_Gnomonic",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Gnomonic"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],PARAMETER["Latitude_Of_Origin",-90],UNIT["Meter",1]]',
+                d3Projection: d3.geoGnomonic().rotate([0, 90])
+            },
+            {
+                id: 'ESRI:54002',
+                name: 'Plate Carree',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Plate_Carree",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Plate_Carree"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'EPSG:4087',
+                name: 'WGS 84 / World Equidistant Cylindrical',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / World Equidistant Cylindrical",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Equidistant_Cylindrical"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",0],UNIT["metre",1]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'EPSG:54001',
+                name: 'WGS 84 / World Mercator',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=merc +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["World_Mercator",GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["Degree",0.017453292519943295]],PROJECTION["Mercator_1SP"],PARAMETER["False_Easting",0],PARAMETER["False_Northing",0],PARAMETER["Central_Meridian",0],UNIT["Meter",1]]',
+                d3Projection: d3.geoMercator()
+            },
+            {
+                id: 'EPSG:32662',
+                name: 'WGS 84 / Plate Carree',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '全球',
+                units: '米',
+                proj: '+proj=eqc +lat_ts=0 +lat_0=0 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / Plate Carree",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Equidistant_Cylindrical"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",0],UNIT["metre",1]]',
+                d3Projection: d3.geoEquirectangular()
+            },
+            {
+                id: 'EPSG:3832',
+                name: 'WGS 84 / PDC Mercator',
+                category: 'world',
+                type: '圆柱投影',
+                extent: '太平洋',
+                units: '米',
+                proj: '+proj=merc +lon_0=150 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / PDC Mercator",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Mercator_1SP"],PARAMETER["central_meridian",150],UNIT["metre",1]]',
+                d3Projection: d3.geoMercator().center([150, 0])
+            },
+            {
+                id: 'EPSG:32644',
+                name: 'WGS 84 / UTM zone 44N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '78°E - 84°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=44 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 44N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",81],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-81, 0])
+            },
+            {
+                id: 'EPSG:32645',
+                name: 'WGS 84 / UTM zone 45N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '84°E - 90°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=45 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 45N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",87],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-87, 0])
+            },
+            {
+                id: 'EPSG:32646',
+                name: 'WGS 84 / UTM zone 46N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '90°E - 96°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=46 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 46N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",93],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-93, 0])
+            },
+            {
+                id: 'EPSG:32647',
+                name: 'WGS 84 / UTM zone 47N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '96°E - 102°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=47 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 47N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",99],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-99, 0])
+            },
+            {
+                id: 'EPSG:32648',
+                name: 'WGS 84 / UTM zone 48N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '102°E - 108°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=48 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 48N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",105],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-105, 0])
+            },
+            {
+                id: 'EPSG:32650',
+                name: 'WGS 84 / UTM zone 50N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '114°E - 120°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=50 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 50N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",117],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-117, 0])
+            },
+            {
+                id: 'EPSG:32651',
+                name: 'WGS 84 / UTM zone 51N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '120°E - 126°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=51 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 51N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",123],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-123, 0])
+            },
+            {
+                id: 'EPSG:32653',
+                name: 'WGS 84 / UTM zone 53N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '132°E - 138°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=53 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 53N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",135],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-135, 0])
+            },
+            {
+                id: 'EPSG:32654',
+                name: 'WGS 84 / UTM zone 54N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '138°E - 144°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=54 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 54N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",141],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-141, 0])
+            },
+            {
+                id: 'EPSG:32655',
+                name: 'WGS 84 / UTM zone 55N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '144°E - 150°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=55 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 55N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",147],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-147, 0])
+            },
+            {
+                id: 'EPSG:32656',
+                name: 'WGS 84 / UTM zone 56N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '150°E - 156°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=56 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 56N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",153],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-153, 0])
+            },
+            {
+                id: 'EPSG:32657',
+                name: 'WGS 84 / UTM zone 57N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '156°E - 162°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=57 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 57N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",159],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-159, 0])
+            },
+            {
+                id: 'EPSG:32658',
+                name: 'WGS 84 / UTM zone 58N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '162°E - 168°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=58 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 58N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",165],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-165, 0])
+            },
+            {
+                id: 'EPSG:32659',
+                name: 'WGS 84 / UTM zone 59N',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '168°E - 174°E, 北半球',
+                units: '米',
+                proj: '+proj=utm +zone=59 +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 59N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",171],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-171, 0])
+            },
+            {
+                id: 'EPSG:2154',
+                name: 'RGF93 v1 / Lambert-93',
+                category: 'national',
+                type: '圆锥投影',
+                extent: '法国',
+                units: '米',
+                proj: '+proj=lcc +lat_1=49 +lat_2=44 +lat_0=46.5 +lon_0=3 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["RGF93 v1 / Lambert-93",GEOGCS["RGF93 v1",DATUM["Reseau_Geodesique_Francais_1993_v1",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",46.5],PARAMETER["central_meridian",3],PARAMETER["standard_parallel_1",49],PARAMETER["standard_parallel_2",44],PARAMETER["false_easting",700000],PARAMETER["false_northing",6600000],UNIT["metre",1]]',
+                d3Projection: d3.geoConicConformal().parallels([44, 49]).rotate([-3, -46.5])
+            },
+            {
+                id: 'EPSG:27700',
+                name: 'OSGB36 / British National Grid',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '英国',
+                units: '米',
+                proj: '+proj=tmerc +lat_0=49 +lon_0=-2 +k=0.9996012717 +x_0=400000 +y_0=-100000 +ellps=airy +towgs84=446.448,-125.157,542.06,0.15,0.247,0.842,-20.489 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["OSGB36 / British National Grid",GEOGCS["OSGB36",DATUM["Ordnance_Survey_of_Great_Britain_1936",SPHEROID["Airy 1830",6377563.396,299.3249646]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",49],PARAMETER["central_meridian",-2],PARAMETER["scale_factor",0.9996012717],PARAMETER["false_easting",400000],PARAMETER["false_northing",-100000],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([2, 0])
+            },
+            {
+                id: 'EPSG:2163',
+                name: 'US National Atlas Equal Area',
+                category: 'national',
+                type: '方位投影',
+                extent: '美国',
+                units: '米',
+                proj: '+proj=laea +lat_0=45 +lon_0=-100 +x_0=0 +y_0=0 +a=6370997 +b=6370997 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["US National Atlas Equal Area",GEOGCS["Unspecified datum based upon the Clarke 1866 Authalic Sphere",DATUM["Not_specified_based_on_Clarke_1866_Authalic_Sphere",SPHEROID["Clarke 1866 Authalic Sphere",6370997,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Azimuthal_Equal_Area"],PARAMETER["latitude_of_center",45],PARAMETER["longitude_of_center",-100],UNIT["metre",1]]',
+                d3Projection: d3.geoAzimuthalEqualArea().rotate([100, -45])
+            },
+            {
+                id: 'EPSG:2163',
+                name: 'NAD27 / California Albers',
+                category: 'national',
+                type: '圆锥投影',
+                extent: '美国加利福尼亚州',
+                units: '米',
+                proj: '+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +datum=NAD27 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["NAD27 / California Albers",GEOGCS["NAD27",DATUM["North_American_Datum_1927",SPHEROID["Clarke 1866",6378206.4,294.9786982]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Albers"],PARAMETER["standard_parallel_1",34],PARAMETER["standard_parallel_2",40.5],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-120],PARAMETER["false_easting",0],PARAMETER["false_northing",-4000000],UNIT["metre",1]]',
+                d3Projection: d3.geoAlbers().parallels([34, 40.5]).rotate([120, 0])
+            },
+            {
+                id: 'EPSG:32066',
+                name: 'NAD27 / Texas South Central',
+                category: 'national',
+                type: '圆锥投影',
+                extent: '美国德克萨斯州中南部',
+                units: '米',
+                proj: '+proj=lcc +lat_1=28.38333333333333 +lat_2=30.28333333333333 +lat_0=27.83333333333333 +lon_0=-99 +x_0=609601.2192024384 +y_0=0 +datum=NAD27 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["NAD27 / Texas South Central",GEOGCS["NAD27",DATUM["North_American_Datum_1927",SPHEROID["Clarke 1866",6378206.4,294.9786982]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",27.83333333333333],PARAMETER["central_meridian",-99],PARAMETER["standard_parallel_1",28.38333333333333],PARAMETER["standard_parallel_2",30.28333333333333],PARAMETER["false_easting",609601.2192024384],UNIT["metre",1]]',
+                d3Projection: d3.geoConicConformal().parallels([28.3833, 30.2833]).rotate([99, 0])
+            },
+            {
+                id: 'EPSG:31467',
+                name: 'DHDN / Gauss-Kruger zone 3',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '德国',
+                units: '米',
+                proj: '+proj=tmerc +lat_0=0 +lon_0=9 +k=1 +x_0=3500000 +y_0=0 +ellps=bessel +towgs84=598.1,73.7,418.2,0.202,0.045,-2.455,6.7 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["DHDN / Gauss-Kruger zone 3",GEOGCS["DHDN",DATUM["Deutsches_Hauptdreiecksnetz",SPHEROID["Bessel 1841",6377397.155,299.1528128]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",9],PARAMETER["scale_factor",1],PARAMETER["false_easting",3500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-9, 0])
+            },
+            {
+                id: 'EPSG:31468',
+                name: 'DHDN / Gauss-Kruger zone 4',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '德国',
+                units: '米',
+                proj: '+proj=tmerc +lat_0=0 +lon_0=12 +k=1 +x_0=4500000 +y_0=0 +ellps=bessel +towgs84=598.1,73.7,418.2,0.202,0.045,-2.455,6.7 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["DHDN / Gauss-Kruger zone 4",GEOGCS["DHDN",DATUM["Deutsches_Hauptdreiecksnetz",SPHEROID["Bessel 1841",6377397.155,299.1528128]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",12],PARAMETER["scale_factor",1],PARAMETER["false_easting",4500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-12, 0])
+            },
+            {
+                id: 'EPSG:24378',
+                name: 'Kalianpur 1975 / India zone I',
+                category: 'national',
+                type: '圆锥投影',
+                extent: '印度北部',
+                units: '米',
+                proj: '+proj=lcc +lat_1=32.5 +lat_2=26 +lat_0=0 +lon_0=68 +x_0=2743195.5 +y_0=914398.5 +a=6377301.243 +b=6356100.230165385 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Kalianpur 1975 / India zone I",GEOGCS["Kalianpur 1975",DATUM["Kalianpur_1975",SPHEROID["Everest 1830 (1937 Adjustment)",6377301.243,300.8017]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",68],PARAMETER["standard_parallel_1",32.5],PARAMETER["standard_parallel_2",26],UNIT["metre",1]]',
+                d3Projection: d3.geoConicConformal().parallels([26, 32.5]).rotate([-68, 0])
+            },
+            {
+                id: 'EPSG:24379',
+                name: 'Kalianpur 1975 / India zone IIa',
+                category: 'national',
+                type: '圆锥投影',
+                extent: '印度中部',
+                units: '米',
+                proj: '+proj=lcc +lat_1=22.5 +lat_2=15 +lat_0=0 +lon_0=74 +x_0=2743196.4 +y_0=914398.8 +a=6377301.243 +b=6356100.230165385 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Kalianpur 1975 / India zone IIa",GEOGCS["Kalianpur 1975",DATUM["Kalianpur_1975",SPHEROID["Everest 1830 (1937 Adjustment)",6377301.243,300.8017]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",74],PARAMETER["standard_parallel_1",22.5],PARAMETER["standard_parallel_2",15],UNIT["metre",1]]',
+                d3Projection: d3.geoConicConformal().parallels([15, 22.5]).rotate([-74, 0])
+            },
+            {
+                id: 'EPSG:20935',
+                name: 'Lisbon (Lisbon)/Portuguese National Grid',
+                category: 'national',
+                type: '圆锥投影',
+                extent: '葡萄牙',
+                units: '米',
+                proj: '+proj=lcc +lat_1=39.66666666666666 +lat_2=38.03333333333333 +lat_0=37.5 +lon_0=-8.13190611111111 +x_0=0 +y_0=0 +ellps=intl +towgs84=-304.046,-60.576,103.24,-1.2423,0.7929,-2.8854,28.636 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["Lisbon / Portuguese National Grid",GEOGCS["Lisbon",DATUM["Lisbon",SPHEROID["International 1924",6378388,297]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Lambert_Conformal_Conic_2SP"],PARAMETER["latitude_of_origin",37.5],PARAMETER["central_meridian",-8.13190611111111],PARAMETER["standard_parallel_1",39.66666666666666],PARAMETER["standard_parallel_2",38.03333333333333],UNIT["metre",1]]',
+                d3Projection: d3.geoConicConformal().parallels([38.0333, 39.6667]).rotate([8.1319, 0])
+            },
+            {
+                id: 'EPSG:23032',
+                name: 'ED50 / UTM zone 32N',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '欧洲西部',
+                units: '米',
+                proj: '+proj=utm +zone=32 +ellps=intl +towgs84=-87,-98,-121,0,0,0,0 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["ED50 / UTM zone 32N",GEOGCS["ED50",DATUM["European_Datum_1950",SPHEROID["International 1924",6378388,297]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",9],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-9, 0])
+            },
+            {
+                id: 'EPSG:23033',
+                name: 'ED50 / UTM zone 33N',
+                category: 'national',
+                type: '横轴墨卡托投影',
+                extent: '欧洲中部',
+                units: '米',
+                proj: '+proj=utm +zone=33 +ellps=intl +towgs84=-87,-98,-121,0,0,0,0 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["ED50 / UTM zone 33N",GEOGCS["ED50",DATUM["European_Datum_1950",SPHEROID["International 1924",6378388,297]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",15],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-15, 0])
+            },
+            {
+                id: 'EPSG:32701',
+                name: 'WGS 84 / UTM zone 1S',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '180°W - 174°W, 南半球',
+                units: '米',
+                proj: '+proj=utm +zone=1 +south +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 1S",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-177],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",10000000],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([177, 0])
+            },
+            {
+                id: 'EPSG:32760',
+                name: 'WGS 84 / UTM zone 60S',
+                category: 'utm',
+                type: '横轴墨卡托投影',
+                extent: '174°E - 180°E, 南半球',
+                units: '米',
+                proj: '+proj=utm +zone=60 +south +datum=WGS84 +units=m +no_defs +type=crs',
+                wkt: 'PROJCS["WGS 84 / UTM zone 60S",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",177],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",10000000],UNIT["metre",1]]',
+                d3Projection: d3.geoTransverseMercator().rotate([-177, 0])
+            }
+        ];
+
+        // 世界地图数据
+        let worldData = null;
+        let currentProjection = projections[0];
+
+        // 初始化
+        async function init() {
+            // 加载世界地图数据
+            try {
+                const response = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+                worldData = await response.json();
+            } catch (error) {
+                console.error('Failed to load world data:', error);
+            }
+
+            renderProjectionList();
+            setupEventListeners();
+            selectProjection(projections[0]);
+        }
+
+        // 渲染投影列表
+        function renderProjectionList(filter = '', category = 'all', filterMode = 'category') {
+            const list = document.getElementById('projection-list');
+            const filtered = projections.filter(p => {
+                const matchSearch = p.name.toLowerCase().includes(filter.toLowerCase()) || 
+                                   p.id.toLowerCase().includes(filter.toLowerCase());
+                let matchCategory = category === 'all';
+                
+                if (filterMode === 'category') {
+                    matchCategory = category === 'all' || p.category === category;
+                } else {
+                    matchCategory = category === 'all' || p.type === category;
+                }
+                
+                return matchSearch && matchCategory;
+            });
+
+            list.innerHTML = filtered.map(p => `
+                <button class="projection-btn w-full text-left px-3 py-2 rounded-lg border border-slate-600 text-sm hover:border-blue-500 ${p.id === currentProjection.id ? 'active' : ''}" 
+                        data-id="${p.id}">
+                    <div class="font-medium">${p.name}</div>
+                    <div class="text-xs opacity-70">${p.id}</div>
+                </button>
+            `).join('');
+
+            // 绑定点击事件
+            list.querySelectorAll('.projection-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const proj = projections.find(p => p.id === btn.dataset.id);
+                    if (proj) selectProjection(proj);
+                });
+            });
+        }
+
+        // 选择投影
+        function selectProjection(proj) {
+            currentProjection = proj;
+            
+            // 更新UI
+            document.getElementById('projection-title').textContent = proj.name;
+            document.getElementById('projection-epsg').textContent = proj.id;
+            document.getElementById('projection-type').textContent = proj.type;
+            document.getElementById('projection-extent').textContent = proj.extent;
+            document.getElementById('projection-units').textContent = proj.units;
+            document.getElementById('wkt-content').value = proj.wkt;
+            document.getElementById('proj-content').value = proj.proj;
+
+            // 更新列表高亮
+            document.querySelectorAll('.projection-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.id === proj.id);
+            });
+
+            // 渲染地图
+            renderMap();
+        }
+
+        // 渲染地图
+        let currentZoom = null;
+        
+        function renderMap() {
+            const svg = d3.select('#map-svg');
+            const container = svg.node().parentElement;
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            svg.selectAll('*').remove();
+
+            const errorMessage = document.getElementById('error-message');
+            errorMessage.classList.add('hidden');
+
+            try {
+                const centerLon = parseFloat(document.getElementById('center-lon').value) || 0;
+                const centerLat = parseFloat(document.getElementById('center-lat').value) || 0;
+                
+                const projection = currentProjection.d3Projection
+                    .translate([width / 2, height / 2])
+                    .scale(Math.min(width, height) / 5)
+                    .center([centerLon, centerLat]);
+
+                const path = d3.geoPath().projection(projection);
+
+                // 创建主组元素用于缩放
+                const g = svg.append('g').attr('class', 'map-group');
+
+                // 绘制球体轮廓
+                if (document.getElementById('show-sphere').checked) {
+                    const sphere = { type: 'Sphere' };
+                    g.append('path')
+                        .datum(sphere)
+                        .attr('class', 'sphere')
+                        .attr('d', path);
+                }
+
+                // 绘制经纬网
+                if (document.getElementById('show-graticule').checked) {
+                    const graticule = d3.geoGraticule();
+                    g.append('path')
+                        .datum(graticule())
+                        .attr('class', 'graticule')
+                        .attr('d', path);
+                }
+
+                // 绘制陆地
+                if (worldData) {
+                    const land = topojson.feature(worldData, worldData.objects.countries);
+                    g.append('path')
+                        .datum(land)
+                        .attr('class', 'land')
+                        .attr('d', path);
+                }
+
+                // 设置缩放行为
+                const zoom = d3.zoom()
+                    .scaleExtent([0.5, 8])
+                    .on('zoom', (event) => {
+                        g.attr('transform', event.transform);
+                    });
+
+                svg.call(zoom);
+                currentZoom = zoom;
+                
+            } catch (error) {
+                console.error('Projection error:', error);
+                errorMessage.classList.remove('hidden');
+                document.getElementById('error-text').textContent = error.message;
+            }
+        }
+
+        // 设置事件监听
+        function setupEventListeners() {
+            // 搜索
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                renderProjectionList(e.target.value, document.getElementById('category-filter').value, document.getElementById('filter-mode').value);
+            });
+
+            // 分类方式切换
+            document.getElementById('filter-mode').addEventListener('change', (e) => {
+                const filterMode = e.target.value;
+                const filterSelect = document.getElementById('category-filter');
+                const filterLabel = document.getElementById('filter-label');
+                
+                if (filterMode === 'category') {
+                    filterSelect.innerHTML = `
+                        <option value="all">全部投影</option>
+                        <option value="world">世界投影</option>
+                        <option value="utm">UTM投影</option>
+                        <option value="national">国家/地区投影</option>
+                        <option value="polar">极地投影</option>
+                        <option value="custom">自定义投影</option>
+                    `;
+                    filterLabel.textContent = '投影分类';
+                } else {
+                    filterSelect.innerHTML = `
+                        <option value="all">全部投影</option>
+                        <option value="圆柱投影">圆柱投影</option>
+                        <option value="伪圆柱投影">伪圆柱投影</option>
+                        <option value="圆锥投影">圆锥投影</option>
+                        <option value="圆锥等面积投影">圆锥等面积投影</option>
+                        <option value="横轴墨卡托投影">横轴墨卡托投影</option>
+                        <option value="高斯-克吕格投影">高斯-克吕格投影</option>
+                        <option value="方位投影">方位投影</option>
+                        <option value="极地立体投影">极地立体投影</option>
+                        <option value="圆柱等面积投影">圆柱等面积投影</option>
+                        <option value="兰伯特等角圆锥投影">兰伯特等角圆锥投影</option>
+                        <option value="兰伯特等面积方位投影">兰伯特等面积方位投影</option>
+                        <option value="混合投影">混合投影</option>
+                        <option value="地理坐标系">地理坐标系</option>
+                        <option value="自定义">自定义</option>
+                    `;
+                    filterLabel.textContent = '投影类型';
+                }
+                
+                renderProjectionList(document.getElementById('search-input').value, 'all', filterMode);
+            });
+
+            // 分类筛选
+            document.getElementById('category-filter').addEventListener('change', (e) => {
+                renderProjectionList(document.getElementById('search-input').value, e.target.value, document.getElementById('filter-mode').value);
+            });
+
+            // 显示选项
+            document.getElementById('show-graticule').addEventListener('change', renderMap);
+            document.getElementById('show-sphere').addEventListener('change', renderMap);
+
+            // 中心点设置
+            document.getElementById('center-lon').addEventListener('change', renderMap);
+            document.getElementById('center-lat').addEventListener('change', renderMap);
+
+            // 重置缩放
+            document.getElementById('reset-zoom').addEventListener('click', () => {
+                const svg = d3.select('#map-svg');
+                svg.transition().duration(300).call(d3.zoom().transform, d3.zoomIdentity);
+            });
+
+            // 导出PNG
+            document.getElementById('export-png').addEventListener('click', () => {
+                const svgElement = document.getElementById('map-svg');
+                const svgData = new XMLSerializer().serializeToString(svgElement);
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const svgSize = svgElement.getBoundingClientRect();
+                canvas.width = svgSize.width * 2;
+                canvas.height = svgSize.height * 2;
+                ctx.scale(2, 2);
+                
+                const img = new Image();
+                const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+                const url = URL.createObjectURL(svgBlob);
+                
+                img.onload = function() {
+                    ctx.fillStyle = '#1e3a5f';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0);
+                    URL.revokeObjectURL(url);
+                    
+                    const link = document.createElement('a');
+                    link.download = `map-${currentProjection.name.replace(/\s+/g, '-')}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                };
+                
+                img.src = url;
+            });
+
+            // 导出SVG
+            document.getElementById('export-svg').addEventListener('click', () => {
+                const svgElement = document.getElementById('map-svg');
+                const svgData = new XMLSerializer().serializeToString(svgElement);
+                const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+                const url = URL.createObjectURL(svgBlob);
+                
+                const link = document.createElement('a');
+                link.download = `map-${currentProjection.name.replace(/\s+/g, '-')}.svg`;
+                link.href = url;
+                link.click();
+                
+                URL.revokeObjectURL(url);
+            });
+
+            // 复制按钮
+            document.querySelectorAll('.copy-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const target = document.getElementById(btn.dataset.target);
+                    navigator.clipboard.writeText(target.value).then(() => {
+                        btn.classList.add('copied');
+                        btn.textContent = '已复制';
+                        setTimeout(() => {
+                            btn.classList.remove('copied');
+                            btn.textContent = '复制';
+                        }, 2000);
+                    });
+                });
+            });
+
+            // 自定义投影
+            document.getElementById('apply-custom').addEventListener('click', () => {
+                const customProj = document.getElementById('custom-proj').value.trim();
+                const customWkt = document.getElementById('custom-wkt').value.trim();
+                const customName = document.getElementById('custom-name').value.trim() || '自定义投影';
+                
+                if (!customProj && !customWkt) {
+                    alert('请输入 PROJ 字符串或 WKT 字符串');
+                    return;
+                }
+
+                try {
+                    if (customProj) {
+                        proj4.defs('custom', customProj);
+                    }
+                    
+                    let d3Proj = d3.geoEquirectangular();
+                    
+                    const parseProjParam = (projStr, param) => {
+                        const regex = new RegExp(`\\+${param}=(-?\\d+\\.?\\d*)`, 'i');
+                        const match = projStr.match(regex);
+                        return match ? parseFloat(match[1]) : null;
+                    };
+
+                    if (customProj) {
+                        const projLower = customProj.toLowerCase();
+                        const lon0 = parseProjParam(customProj, 'lon_0');
+                        const lat0 = parseProjParam(customProj, 'lat_0');
+                        const latTs = parseProjParam(customProj, 'lat_ts');
+                        const lat1 = parseProjParam(customProj, 'lat_1');
+                        const lat2 = parseProjParam(customProj, 'lat_2');
+                        
+                        if (projLower.includes('+proj=merc')) {
+                            d3Proj = d3.geoMercator();
+                            if (lon0 !== null) d3Proj = d3Proj.center([lon0, 0]);
+                        } else if (projLower.includes('+proj=eqc') || projLower.includes('+proj=plate')) {
+                            d3Proj = d3.geoEquirectangular();
+                            if (lon0 !== null) d3Proj = d3Proj.center([lon0, 0]);
+                        } else if (projLower.includes('+proj=stere')) {
+                            d3Proj = d3.geoStereographic();
+                            if (lon0 !== null && lat0 !== null) {
+                                d3Proj = d3Proj.rotate([-lon0, -lat0]);
+                            } else if (lon0 !== null) {
+                                d3Proj = d3Proj.rotate([-lon0, 0]);
+                            }
+                        } else if (projLower.includes('+proj=lcc')) {
+                            d3Proj = d3.geoConicConformal();
+                            if (lat1 !== null && lat2 !== null) d3Proj = d3Proj.parallels([lat1, lat2]);
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        } else if (projLower.includes('+proj=aea') || projLower.includes('+proj=albers')) {
+                            d3Proj = d3.geoAlbers();
+                            if (lat1 !== null && lat2 !== null) d3Proj = d3Proj.parallels([lat1, lat2]);
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        } else if (projLower.includes('+proj=laea')) {
+                            d3Proj = d3.geoAzimuthalEqualArea();
+                            if (lon0 !== null && lat0 !== null) {
+                                d3Proj = d3Proj.rotate([-lon0, -lat0]);
+                            } else if (lon0 !== null) {
+                                d3Proj = d3Proj.rotate([-lon0, 0]);
+                            }
+                        } else if (projLower.includes('+proj=tmerc')) {
+                            d3Proj = d3.geoTransverseMercator();
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        } else if (projLower.includes('+proj=moll')) {
+                            d3Proj = d3.geoMollweide();
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        } else if (projLower.includes('+proj=robin')) {
+                            d3Proj = d3.geoRobinson();
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        } else if (projLower.includes('+proj=mill')) {
+                            d3Proj = d3.geoMiller();
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        } else if (projLower.includes('+proj=eck4')) {
+                            d3Proj = d3.geoEckert4();
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        } else if (projLower.includes('+proj=hammer')) {
+                            d3Proj = d3.geoHammer();
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        } else if (projLower.includes('+proj=gnom')) {
+                            d3Proj = d3.geoGnomonic();
+                            if (lon0 !== null && lat0 !== null) {
+                                d3Proj = d3Proj.rotate([-lon0, -lat0]);
+                            } else if (lon0 !== null) {
+                                d3Proj = d3Proj.rotate([-lon0, 0]);
+                            }
+                        } else if (projLower.includes('+proj=aeqd')) {
+                            d3Proj = d3.geoAzimuthalEquidistant();
+                            if (lon0 !== null && lat0 !== null) {
+                                d3Proj = d3Proj.rotate([-lon0, -lat0]);
+                            } else if (lon0 !== null) {
+                                d3Proj = d3Proj.rotate([-lon0, 0]);
+                            }
+                        } else if (projLower.includes('+proj=sinu')) {
+                            d3Proj = d3.geoSinusoidal();
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        } else if (projLower.includes('+proj=eqearth')) {
+                            d3Proj = d3.geoEqualEarth();
+                            if (lon0 !== null) d3Proj = d3Proj.rotate([-lon0, 0]);
+                        }
+                    }
+
+                    const customProjection = {
+                        id: 'CUSTOM_' + Date.now(),
+                        name: customName,
+                        category: 'custom',
+                        type: '自定义',
+                        extent: '自定义',
+                        units: '米',
+                        proj: customProj || '(无 PROJ 字符串)',
+                        wkt: customWkt || '(无 WKT 字符串)',
+                        d3Projection: d3Proj
+                    };
+
+                    selectProjection(customProjection);
+                } catch (error) {
+                    alert('投影字符串解析错误: ' + error.message);
+                }
+            });
+
+            // 窗口大小变化
+            window.addEventListener('resize', renderMap);
+
+            // 方向键切换投影
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                
+                const filter = document.getElementById('search-input').value;
+                const category = document.getElementById('category-filter').value;
+                const filterMode = document.getElementById('filter-mode').value;
+                const filtered = projections.filter(p => {
+                    const matchSearch = p.name.toLowerCase().includes(filter.toLowerCase()) || 
+                                       p.id.toLowerCase().includes(filter.toLowerCase());
+                    let matchCategory = category === 'all';
+                    
+                    if (filterMode === 'category') {
+                        matchCategory = category === 'all' || p.category === category;
+                    } else {
+                        matchCategory = category === 'all' || p.type === category;
+                    }
+                    
+                    return matchSearch && matchCategory;
+                });
+
+                if (filtered.length === 0) return;
+
+                const currentIndex = filtered.findIndex(p => p.id === currentProjection.id);
+                let newIndex = currentIndex;
+
+                if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    newIndex = currentIndex <= 0 ? filtered.length - 1 : currentIndex - 1;
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    newIndex = currentIndex >= filtered.length - 1 ? 0 : currentIndex + 1;
+                }
+
+                if (newIndex !== currentIndex) {
+                    selectProjection(filtered[newIndex]);
+                    const btn = document.querySelector(`.projection-btn[data-id="${filtered[newIndex].id}"]`);
+                    if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            });
+        }
+
+        // 启动
+        init();
+    </script>
+</body>
+</html>

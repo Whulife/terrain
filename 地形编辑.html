@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>城市设计师：地形编辑系统</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0b0f1a; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; touch-action: none; }
+        canvas { display: block; }
+        .game-ui { pointer-events: none; position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; }
+        .panel { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(51, 65, 85, 0.5); pointer-events: auto; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); }
+        .tool-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        .tool-btn { 
+            padding: 12px 8px; border-radius: 8px; font-size: 0.75rem; font-weight: 600;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(71, 85, 105, 0.3); color: #94a3b8; cursor: pointer;
+            display: flex; flex-direction: column; align-items: center; gap: 4px;
+        }
+        .tool-btn:hover { background: rgba(51, 65, 85, 0.8); color: #f8fafc; transform: translateY(-1px); }
+        .tool-btn.active { background: #3b82f6; border-color: #60a5fa; color: white; box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
+        .tool-btn svg { width: 20px; height: 20px; }
+        input[type="range"] { accent-color: #3b82f6; width: 100%; height: 6px; border-radius: 3px; background: #1e293b; appearance: none; }
+        .status-bar { font-size: 0.7rem; color: #64748b; background: rgba(15, 23, 42, 0.9); padding: 4px 12px; border-radius: 20px; }
+    </style>
+</head>
+<body>
+
+<div id="loading" class="fixed inset-0 bg-slate-950 z-[100] flex flex-col items-center justify-center">
+    <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+    <p class="mt-4 font-medium tracking-widest text-blue-400">正在构建世界引擎...</p>
+</div>
+
+<div class="game-ui">
+    <!-- Top Bar -->
+    <div class="flex justify-between items-start">
+        <div class="panel p-4 flex items-center gap-4">
+            <div class="bg-blue-600 p-2 rounded-lg">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" class="w-6 h-6 text-white"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path></svg>
+            </div>
+            <div>
+                <h1 class="text-sm font-bold leading-none">地形编辑器</h1>
+                <p class="text-[10px] text-slate-500 mt-1 uppercase tracking-tighter">Cities: Web Edition</p>
+            </div>
+        </div>
+        
+        <div class="flex gap-2">
+            <button onclick="resetTerrain()" class="panel px-4 py-2 text-xs font-bold hover:bg-red-900/20 text-red-400 border-red-900/30">重置地图</button>
+            <button onclick="exportData()" class="panel px-4 py-2 text-xs font-bold hover:bg-blue-600 transition">保存城市</button>
+        </div>
+    </div>
+
+    <!-- Right Side Tools -->
+    <div class="flex flex-col items-end gap-4 absolute right-4 top-24 bottom-24 pointer-events-none">
+        <div class="panel p-4 w-56 flex flex-col gap-6">
+            <section>
+                <header class="text-[10px] font-bold text-slate-500 mb-3 uppercase tracking-widest flex justify-between">
+                    <span>笔刷设置</span>
+                    <span id="brushSizeVal">20</span>
+                </header>
+                <input type="range" id="brushSize" min="5" max="80" value="20">
+                <div class="mt-4">
+                    <div class="flex justify-between text-[10px] text-slate-500 mb-2 font-bold uppercase">强度 <span id="brushStrengthVal">1.2</span></div>
+                    <input type="range" id="brushStrength" min="0.1" max="5" step="0.1" value="1.2">
+                </div>
+            </section>
+
+            <section>
+                <header class="text-[10px] font-bold text-blue-400 mb-3 uppercase tracking-widest">地貌改造</header>
+                <div class="tool-grid">
+                    <button onclick="setTool('raise')" id="btn-raise" class="tool-btn active"><span>隆起</span></button>
+                    <button onclick="setTool('lower')" id="btn-lower" class="tool-btn"><span>下陷</span></button>
+                    <button onclick="setTool('level')" id="btn-level" class="tool-btn"><span>平整</span></button>
+                    <button onclick="setTool('soften')" id="btn-soften" class="tool-btn"><span>平滑</span></button>
+                    <button onclick="setTool('slope')" id="btn-slope" class="tool-btn"><span>斜坡</span></button>
+                    <button onclick="setTool('plateau')" id="btn-plateau" class="tool-btn"><span>台地</span></button>
+                </div>
+            </section>
+
+            <section>
+                <header class="text-[10px] font-bold text-green-400 mb-3 uppercase tracking-widest">地表与规划</header>
+                <div class="tool-grid">
+                    <button onclick="setTool('grass')" id="btn-grass" class="tool-btn"><span>草地</span></button>
+                    <button onclick="setTool('sand')" id="btn-sand" class="tool-btn"><span>裸地</span></button>
+                    <button onclick="setTool('road')" id="btn-road" class="tool-btn"><span>道路</span></button>
+                    <button onclick="setTool('city')" id="btn-city" class="tool-btn"><span>建成区</span></button>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Bottom Bar -->
+    <div class="flex justify-center mb-4">
+        <div class="status-bar flex items-center gap-4">
+            <span>[右键] 旋转视角</span>
+            <span class="w-px h-3 bg-slate-700"></span>
+            <span>[滚轮] 缩放</span>
+            <span class="w-px h-3 bg-slate-700"></span>
+            <span>[左键] 执行工具</span>
+            <span class="w-px h-3 bg-slate-700"></span>
+            <span id="coordsDisplay">X: 0, Z: 0</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    let scene, camera, renderer, controls, terrain, water, brushCursor;
+    let raycaster = new THREE.Raycaster();
+    let mouse = new THREE.Vector2();
+    let isEditing = false;
+    let currentTool = 'raise';
+    
+    // 配置
+    const T_SIZE = 400;
+    const T_SEGMENTS = 160;
+    const COLORS = {
+        grass: new THREE.Color(0x386641),
+        sand: new THREE.Color(0xbcbd8b),
+        road: new THREE.Color(0x334155),
+        city: new THREE.Color(0x64748b),
+        water: new THREE.Color(0x0ea5e9)
+    };
+
+    let slopeAnchor = null; // 用于斜坡工具
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0f172a);
+        scene.fog = new THREE.FogExp2(0x0f172a, 0.0015);
+
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 3000);
+        camera.position.set(300, 300, 300);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+
+        // 灯光
+        const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambient);
+
+        const sun = new THREE.DirectionalLight(0xfff5e6, 1.2);
+        sun.position.set(200, 400, 100);
+        sun.castShadow = true;
+        sun.shadow.mapSize.set(2048, 2048);
+        sun.shadow.camera.left = -300;
+        sun.shadow.camera.right = 300;
+        sun.shadow.camera.top = 300;
+        sun.shadow.camera.bottom = -300;
+        scene.add(sun);
+
+        createTerrain();
+        createWater();
+        createBrushCursor();
+
+        // 事件监听
+        renderer.domElement.addEventListener('pointerdown', handleDown);
+        window.addEventListener('pointerup', () => isEditing = false);
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('resize', onWindowResize);
+
+        // UI 联动
+        document.getElementById('brushSize').oninput = (e) => {
+            const val = e.target.value;
+            document.getElementById('brushSizeVal').innerText = val;
+            brushCursor.scale.set(val, 1, val);
+        };
+        document.getElementById('brushStrength').oninput = (e) => {
+            document.getElementById('brushStrengthVal').innerText = e.target.value;
+        };
+
+        setTimeout(() => document.getElementById('loading').style.display = 'none', 1000);
+        animate();
+    }
+
+    function createTerrain() {
+        const geo = new THREE.PlaneBufferGeometry(T_SIZE, T_SIZE, T_SEGMENTS, T_SEGMENTS);
+        geo.rotateX(-Math.PI / 2);
+
+        const colors = new Float32Array(geo.attributes.position.count * 3);
+        for(let i=0; i < colors.length; i+=3) {
+            colors[i] = COLORS.grass.r;
+            colors[i+1] = COLORS.grass.g;
+            colors[i+2] = COLORS.grass.b;
+        }
+        geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        const mat = new THREE.MeshStandardMaterial({
+            vertexColors: true,
+            roughness: 0.8,
+            metalness: 0.1,
+            flatShading: false
+        });
+
+        terrain = new THREE.Mesh(geo, mat);
+        terrain.receiveShadow = true;
+        terrain.castShadow = true;
+        scene.add(terrain);
+    }
+
+    function createWater() {
+        const geo = new THREE.PlaneBufferGeometry(T_SIZE, T_SIZE);
+        geo.rotateX(-Math.PI / 2);
+        const mat = new THREE.MeshStandardMaterial({
+            color: COLORS.water,
+            transparent: true,
+            opacity: 0.7,
+            metalness: 0.9,
+            roughness: 0.1
+        });
+        water = new THREE.Mesh(geo, mat);
+        water.position.y = 5; // 默认水面
+        scene.add(water);
+    }
+
+    function createBrushCursor() {
+        const geo = new THREE.CylinderBufferGeometry(1, 1, 100, 32, 1, true);
+        const mat = new THREE.MeshBasicMaterial({ 
+            color: 0x3b82f6, 
+            transparent: true, 
+            opacity: 0.2, 
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        brushCursor = new THREE.Mesh(geo, mat);
+        const ring = new THREE.Mesh(
+            new THREE.RingBufferGeometry(0.95, 1, 32).rotateX(-Math.PI/2),
+            new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.8 })
+        );
+        brushCursor.add(ring);
+        const size = document.getElementById('brushSize').value;
+        brushCursor.scale.set(size, 1, size);
+        scene.add(brushCursor);
+    }
+
+    function handleDown(e) {
+        if(e.button !== 0) return;
+        isEditing = true;
+        
+        if(currentTool === 'slope') {
+            raycaster.setFromCamera(mouse, camera);
+            const hits = raycaster.intersectObject(terrain);
+            if(hits.length > 0) {
+                if(!slopeAnchor) {
+                    slopeAnchor = hits[0].point.clone();
+                } else {
+                    applySlope(slopeAnchor, hits[0].point.clone());
+                    slopeAnchor = null;
+                }
+            }
+        } else {
+            applyTool();
+        }
+    }
+
+    function onPointerMove(e) {
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const hits = raycaster.intersectObject(terrain);
+
+        if(hits.length > 0) {
+            const pt = hits[0].point;
+            brushCursor.position.set(pt.x, pt.y, pt.z);
+            brushCursor.visible = true;
+            document.getElementById('coordsDisplay').innerText = `X: ${Math.round(pt.x)}, Z: ${Math.round(pt.z)}`;
+            if(isEditing && currentTool !== 'slope') applyTool();
+        } else {
+            brushCursor.visible = false;
+        }
+    }
+
+    function setTool(t) {
+        currentTool = t;
+        slopeAnchor = null;
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('btn-'+t).classList.add('active');
+        
+        // 视觉反馈颜色
+        if(['grass','sand','road','city'].includes(t)) brushCursor.children[0].material.color.set(0x10b981);
+        else if(t === 'slope') brushCursor.children[0].material.color.set(0xf59e0b);
+        else brushCursor.children[0].material.color.set(0x3b82f6);
+    }
+
+    function applyTool() {
+        raycaster.setFromCamera(mouse, camera);
+        const hits = raycaster.intersectObject(terrain);
+        if(hits.length === 0) return;
+
+        const center = hits[0].point;
+        const radius = parseFloat(document.getElementById('brushSize').value);
+        const strength = parseFloat(document.getElementById('brushStrength').value);
+
+        const pos = terrain.geometry.attributes.position;
+        const col = terrain.geometry.attributes.color;
+
+        let needsPos = false;
+        let needsCol = false;
+
+        for(let i=0; i<pos.count; i++) {
+            const x = pos.getX(i);
+            const z = pos.getZ(i);
+            const y = pos.getY(i);
+            const dist = Math.sqrt((x-center.x)**2 + (z-center.z)**2);
+
+            if(dist < radius) {
+                const falloff = Math.pow(1 - dist/radius, 2);
+                
+                // 地形修改
+                if(['raise','lower','level','soften','plateau'].includes(currentTool)) {
+                    needsPos = true;
+                    switch(currentTool) {
+                        case 'raise': pos.setY(i, y + strength * falloff); break;
+                        case 'lower': pos.setY(i, y - strength * falloff); break;
+                        case 'level': pos.setY(i, y + (center.y - y) * 0.1 * strength * falloff); break;
+                        case 'soften': pos.setY(i, y + (center.y - y) * 0.05 * falloff); break;
+                        case 'plateau': 
+                            const step = 20; // 阶梯高度
+                            const targetY = Math.round(center.y / step) * step;
+                            pos.setY(i, y + (targetY - y) * 0.1 * strength * falloff);
+                            break;
+                    }
+                } 
+                // 材质修改
+                else if(['grass','sand','road','city'].includes(currentTool)) {
+                    needsCol = true;
+                    const targetColor = COLORS[currentTool];
+                    const r = col.getX(i), g = col.getY(i), b = col.getZ(i);
+                    const s = strength * 0.1 * falloff;
+                    col.setXYZ(i, r+(targetColor.r-r)*s, g+(targetColor.g-g)*s, b+(targetColor.b-b)*s);
+                }
+            }
+        }
+
+        if(needsPos) {
+            pos.needsUpdate = true;
+            terrain.geometry.computeVertexNormals();
+        }
+        if(needsCol) col.needsUpdate = true;
+    }
+
+    function applySlope(start, end) {
+        const pos = terrain.geometry.attributes.position;
+        const radius = parseFloat(document.getElementById('brushSize').value);
+        
+        // 向量计算
+        const dir = new THREE.Vector3().subVectors(end, start);
+        const length = dir.length();
+        dir.normalize();
+
+        for(let i=0; i<pos.count; i++) {
+            const p = new THREE.Vector3(pos.getX(i), 0, pos.getZ(i));
+            const baseP = new THREE.Vector3(start.x, 0, start.z);
+            
+            // 投影点到起终点连线上
+            const v = new THREE.Vector3().subVectors(p, baseP);
+            const projection = v.dot(dir);
+            
+            if(projection >= 0 && projection <= length) {
+                const closestPoint = new THREE.Vector3().copy(dir).multiplyScalar(projection).add(baseP);
+                const distToLine = p.distanceTo(closestPoint);
+
+                if(distToLine < radius) {
+                    const ratio = projection / length;
+                    const targetH = start.y + (end.y - start.y) * ratio;
+                    const falloff = 1 - distToLine / radius;
+                    const currentH = pos.getY(i);
+                    pos.setY(i, currentH + (targetH - currentH) * falloff);
+                }
+            }
+        }
+        pos.needsUpdate = true;
+        terrain.geometry.computeVertexNormals();
+    }
+
+    function resetTerrain() {
+        const pos = terrain.geometry.attributes.position;
+        for(let i=0; i<pos.count; i++) pos.setY(i, 0);
+        pos.needsUpdate = true;
+        terrain.geometry.computeVertexNormals();
+    }
+
+    function exportData() {
+        alert("地形已保存到缓存。在实际游戏中，这里会导出为 .hmap 格式。");
+    }
+
+    function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        if(water) water.position.y = 5 + Math.sin(Date.now() * 0.001) * 0.2;
+        renderer.render(scene, camera);
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>

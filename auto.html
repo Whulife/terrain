@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地图预览</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+        #map { height: 100vh; width: 100%; }
+        
+        .map-selector {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            padding: 16px;
+            min-width: 200px;
+            max-height: calc(100vh - 40px);
+            overflow-y: auto;
+        }
+        
+        .map-selector::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .map-selector::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        
+        .map-selector::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        .map-selector h3 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1e293b;
+        }
+        
+        .map-option {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+        
+        .map-option:hover {
+            background: #f1f5f9;
+        }
+        
+        .map-option.active {
+            border-color: #3b82f6;
+            background: #eff6ff;
+        }
+        
+        .map-option-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        
+        .map-option-info {
+            flex: 1;
+        }
+        
+        .map-option-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: #1e293b;
+            margin-bottom: 2px;
+        }
+        
+        .map-option-desc {
+            font-size: 11px;
+            color: #64748b;
+        }
+        
+        .zoom-control {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .zoom-btn {
+            width: 36px;
+            height: 36px;
+            border: none;
+            background: white;
+            cursor: pointer;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        
+        .zoom-btn:hover {
+            background: #f1f5f9;
+        }
+        
+        .zoom-btn:first-child {
+            border-radius: 8px 8px 0 0;
+        }
+        
+        .zoom-btn:last-child {
+            border-radius: 0 0 8px 8px;
+        }
+        
+        .current-location {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            width: 40px;
+            height: 40px;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            transition: all 0.2s;
+        }
+        
+        .current-location:hover {
+            transform: scale(1.1);
+            background: #f1f5f9;
+        }
+        
+        .zoom-indicator {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1e293b;
+            font-family: monospace;
+        }
+        
+        .zoom-indicator span {
+            color: #3b82f6;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div class="map-selector">
+        <h3>选择地图</h3>
+        
+        <div style="margin-bottom: 12px; font-size: 12px; font-weight: 600; color: #64748b;">ESRI地图</div>
+        <div class="map-option active" data-layer="satellite">
+            <div class="map-option-icon" style="background: linear-gradient(135deg, #1e3a8a, #3b82f6);">🛰️</div>
+            <div class="map-option-info">
+                <div class="map-option-title">ESRI卫星影像</div>
+                <div class="map-option-desc">全球卫星影像</div>
+            </div>
+        </div>
+        <div class="map-option" data-layer="esri">
+            <div class="map-option-icon" style="background: linear-gradient(135deg, #4f46e5, #6366f1);">🗺️</div>
+            <div class="map-option-info">
+                <div class="map-option-title">ESRI地图</div>
+                <div class="map-option-desc">世界街道地图</div>
+            </div>
+        </div>
+        <div class="map-option" data-layer="topo">
+            <div class="map-option-icon" style="background: linear-gradient(135deg, #059669, #10b981);">⛰️</div>
+            <div class="map-option-info">
+                <div class="map-option-title">ESRI地形</div>
+                <div class="map-option-desc">地形等高线图</div>
+            </div>
+        </div>
+        <div class="map-option" data-layer="natgeo">
+            <div class="map-option-icon" style="background: linear-gradient(135deg, #f59e0b, #d97706);">🗺️</div>
+            <div class="map-option-info">
+                <div class="map-option-title">国家地理</div>
+                <div class="map-option-desc">National Geographic</div>
+            </div>
+        </div>
+        <div class="map-option" data-layer="transport">
+            <div class="map-option-icon" style="background: linear-gradient(135deg, #7c3aed, #8b5cf6);">🚗</div>
+            <div class="map-option-info">
+                <div class="map-option-title">ESRI交通</div>
+                <div class="map-option-desc">交通网络图</div>
+            </div>
+        </div>
+        <div class="map-option" data-layer="relief">
+            <div class="map-option-icon" style="background: linear-gradient(135deg, #78716c, #a8a29e);">⛰️</div>
+            <div class="map-option-info">
+                <div class="map-option-title">ESRI阴影地形</div>
+                <div class="map-option-desc">地形阴影图</div>
+            </div>
+        </div>
+        
+        <div style="margin: 16px 0 12px 0; font-size: 12px; font-weight: 600; color: #64748b;">其他地图</div>
+        <div class="map-option" data-layer="osm">
+            <div class="map-option-icon" style="background: linear-gradient(135deg, #059669, #10b981);">🗺️</div>
+            <div class="map-option-info">
+                <div class="map-option-title">OpenStreetMap</div>
+                <div class="map-option-desc">开源地图数据</div>
+            </div>
+        </div>
+        <div class="map-option" data-layer="gaode">
+            <div class="map-option-icon" style="background: linear-gradient(135deg, #dc2626, #ef4444);">🛰️</div>
+            <div class="map-option-info">
+                <div class="map-option-title">高德卫星影像</div>
+                <div class="map-option-desc">国内卫星影像</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="zoom-control">
+        <button class="zoom-btn" id="zoom-in">+</button>
+        <button class="zoom-btn" id="zoom-out">−</button>
+    </div>
+    
+    <button class="current-location" id="locate-btn" title="定位到当前位置">📍</button>
+    
+    <div class="zoom-indicator">Zoom: <span id="zoom-level">4</span></div>
+
+    <script>
+        const map = L.map('map', {
+            zoomControl: false
+        }).setView([35, 105], 4);
+        
+        const mapLayers = {
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Esri Satellite',
+                crossOrigin: true
+            }),
+            esri: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'ESRI World Street Map',
+                crossOrigin: true
+            }),
+            topo: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'ESRI World Topo Map',
+                crossOrigin: true
+            }),
+            natgeo: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'National Geographic World Map',
+                crossOrigin: true
+            }),
+            transport: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'ESRI World Transportation',
+                crossOrigin: true
+            }),
+            relief: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'ESRI World Shaded Relief',
+                crossOrigin: true
+            }),
+            osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors',
+                subdomains: ['a', 'b', 'c'],
+                crossOrigin: true
+            }),
+            gaode: L.tileLayer('https://webst0{s}.is.autonavi.com/appmaptile?style=6&x={x}&y={y}&z={z}', {
+                attribution: '高德卫星影像',
+                subdomains: ['1', '2', '3', '4'],
+                crossOrigin: true
+            })
+        };
+        
+        let currentLayer = mapLayers.satellite;
+        currentLayer.addTo(map);
+        
+        L.control.scale({ imperial: false, metric: true, position: 'bottomleft' }).addTo(map);
+        
+        // 更新缩放等级显示
+        function updateZoomLevel() {
+            document.getElementById('zoom-level').textContent = map.getZoom();
+        }
+        
+        // 监听缩放事件
+        map.on('zoomend', updateZoomLevel);
+        
+        // 初始化显示
+        updateZoomLevel();
+        
+        function switchMapLayer(layerType) {
+            if (currentLayer) {
+                map.removeLayer(currentLayer);
+            }
+            
+            currentLayer = mapLayers[layerType];
+            currentLayer.addTo(map);
+            
+            document.querySelectorAll('.map-option').forEach(opt => {
+                opt.classList.remove('active');
+                if (opt.getAttribute('data-layer') === layerType) {
+                    opt.classList.add('active');
+                }
+            });
+        }
+        
+        document.querySelectorAll('.map-option').forEach(option => {
+            option.addEventListener('click', () => {
+                const layerType = option.getAttribute('data-layer');
+                switchMapLayer(layerType);
+            });
+        });
+        
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            map.zoomIn();
+        });
+        
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            map.zoomOut();
+        });
+        
+        document.getElementById('locate-btn').addEventListener('click', () => {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        const lat = position.coords.latitude;
+                        const lng = position.coords.longitude;
+                        map.setView([lat, lng], 13);
+                        
+                        L.marker([lat, lng]).addTo(map)
+                            .bindPopup('当前位置')
+                            .openPopup();
+                    },
+                    (error) => {
+                        alert('无法获取位置信息');
+                        console.error(error);
+                    }
+                );
+            } else {
+                alert('您的浏览器不支持地理定位');
+            }
+        });
+    </script>
+</body>
+</html>
