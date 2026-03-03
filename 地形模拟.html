@@ -9,6 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/geotiff@2.0.1/dist-browser/geotiff.bundle.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #09090b; font-family: ui-sans-serif, system-ui, sans-serif; }
         canvas { display: block; }
@@ -253,12 +254,15 @@
         <!-- 1. 批量导入 -->
         <div class="section-title">批量导入</div>
         <div class="space-y-2">
-            <div class="grid grid-cols-2 gap-2">
+            <div class="grid grid-cols-3 gap-2">
                 <label class="btn-action cursor-pointer" title="导入ZIP文件，自动识别dem.png、dem.txt、sat.png">
                     📦 导入ZIP <input type="file" id="zip-input" accept=".zip" class="hidden">
                 </label>
                 <label class="btn-action cursor-pointer" title="选择文件夹，自动识别dem.png、dem.txt、sat.png">
-                    📁 导入文件夹 <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden">
+                    📁 导入目录 <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden">
+                </label>
+                <label class="btn-action cursor-pointer" title="导入带GPS信息的照片，自动标记在地图上">
+                    📷 导入照片 <input type="file" id="photo-input" accept="image/*" multiple class="hidden">
                 </label>
             </div>
             <div id="import-status" class="text-[10px] text-zinc-500 hidden"></div>
@@ -704,17 +708,40 @@
         
         // 添加点击事件监听器
         renderer.domElement.addEventListener('click', (event) => {
-            // 如果没有选择工具，不执行任何操作
-            if (window.currentToolMode === 'none') {
-                return;
-            }
-            
             // 计算鼠标位置（归一化设备坐标）
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
             
             // 从相机发射射线
             raycaster.setFromCamera(mouse, camera);
+            
+            // 检测与照片标记的交点
+            const photoMarkers = [];
+            scene.traverse((object) => {
+                if (object.userData && object.userData.type === 'photo') {
+                    photoMarkers.push(object);
+                }
+            });
+            
+            if (photoMarkers.length > 0) {
+                const markerIntersects = raycaster.intersectObjects(photoMarkers, true);
+                if (markerIntersects.length > 0) {
+                    // 找到最近的标记组
+                    let markerGroup = markerIntersects[0].object;
+                    while (markerGroup.parent && !markerGroup.userData.type) {
+                        markerGroup = markerGroup.parent;
+                    }
+                    if (markerGroup.userData.onClick) {
+                        markerGroup.userData.onClick();
+                        return;
+                    }
+                }
+            }
+            
+            // 如果没有选择工具，不执行任何操作
+            if (window.currentToolMode === 'none') {
+                return;
+            }
             
             // 检测与地形的交点
             if (terrain) {
@@ -1119,6 +1146,8 @@
         document.getElementById('folder-input').addEventListener('change', handleFolderImport);
         // DEM数据文件导入
         document.getElementById('dem-txt-input').addEventListener('change', handleDemTxtImport);
+        // 照片导入
+        document.getElementById('photo-input').addEventListener('change', handlePhotoImport);
         // 导出功能
         document.getElementById('export-contours').addEventListener('click', exportContours);
         document.getElementById('export-hypsometric').addEventListener('click', exportHypsometric);
@@ -1505,6 +1534,13 @@
                     customTexture.minFilter = THREE.LinearFilter;
                     customTexture.magFilter = THREE.LinearFilter;
                     customTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    
+                    // 设置纹理wrap和repeat以避免偏移
+                    customTexture.wrapS = THREE.ClampToEdgeWrapping;
+                    customTexture.wrapT = THREE.ClampToEdgeWrapping;
+                    customTexture.repeat.set(1, 1);
+                    customTexture.offset.set(0, 0);
+                    
                     document.getElementById('remove-texture').classList.remove('hidden');
                     if(material && terrain) { 
                         material.map = customTexture; 
@@ -2063,6 +2099,13 @@
                 const loader = new THREE.TextureLoader();
                 loader.load(url, (tex) => {
                     tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                    
+                    // 设置纹理wrap和repeat以避免偏移
+                    tex.wrapS = THREE.ClampToEdgeWrapping;
+                    tex.wrapT = THREE.ClampToEdgeWrapping;
+                    tex.repeat.set(1, 1);
+                    tex.offset.set(0, 0);
+                    
                     customTexture = tex;
                     rebuildMaterial();
                     document.getElementById('remove-texture').classList.remove('hidden');
@@ -2286,6 +2329,482 @@
         
         // 清除输入，允许再次导入
         e.target.value = '';
+    }
+
+    async function handlePhotoImport(e) {
+        const files = Array.from(e.target.files);
+        if (!files || files.length === 0) return;
+        
+        console.log('开始处理照片，文件数量:', files.length);
+        
+        let importedCount = 0;
+        let skippedCount = 0;
+        
+        for (const file of files) {
+            console.log('正在处理文件:', file.name, '大小:', file.size, '类型:', file.type);
+            try {
+                const gpsData = await extractGPSFromPhoto(file);
+                
+                console.log('GPS解析结果:', gpsData);
+                
+                if (!gpsData || !gpsData.latitude || !gpsData.longitude) {
+                    console.log('GPS数据无效，跳过文件');
+                    skippedCount++;
+                    continue;
+                }
+                
+                // 在地图上标记照片位置
+                addPhotoMarker(gpsData.latitude, gpsData.longitude, file);
+                importedCount++;
+                
+            } catch (err) {
+                console.error(`处理照片 ${file.name} 失败:`, err);
+                skippedCount++;
+            }
+        }
+        
+        // 显示导入结果
+        if (importedCount > 0) {
+            showImportStatus(`成功导入 ${importedCount} 张照片${skippedCount > 0 ? `，跳过 ${skippedCount} 张无GPS信息的照片` : ''}`);
+        } else if (skippedCount > 0) {
+            alert(`导入失败：所有 ${skippedCount} 张照片都没有GPS位置信息，无法标记在地图上。`);
+        }
+        
+        // 清除输入，允许再次导入
+        e.target.value = '';
+    }
+
+    async function extractGPSFromPhoto(file) {
+        return new Promise((resolve) => {
+            console.log('使用 exif-js 提取GPS信息:', file.name);
+            
+            EXIF.getData(file, function() {
+                const allMetaData = EXIF.getAllTags(this);
+                console.log('所有EXIF标签:', allMetaData);
+                
+                const lat = EXIF.getTag(this, "GPSLatitude");
+                const lng = EXIF.getTag(this, "GPSLongitude");
+                const latRef = EXIF.getTag(this, "GPSLatitudeRef") || "N";
+                const lngRef = EXIF.getTag(this, "GPSLongitudeRef") || "E";
+                
+                console.log('原始GPS数据:', { lat, lng, latRef, lngRef });
+                
+                if (lat && lng) {
+                    const latitude = convertDMSToDecimal(lat, latRef);
+                    const longitude = convertDMSToDecimal(lng, lngRef);
+                    
+                    console.log('解析后的GPS坐标:', { latitude, longitude });
+                    
+                    if (!isNaN(latitude) && !isNaN(longitude)) {
+                        resolve({ latitude, longitude });
+                        return;
+                    }
+                }
+                
+                console.log('未找到GPS信息');
+                resolve(null);
+            });
+        });
+    }
+    
+    // 将度分秒(DMS)转换为十进制度数
+    function convertDMSToDecimal(coord, ref) {
+        if (!coord || coord.length < 3) return null;
+        
+        const degrees = coord[0].numerator / coord[0].denominator;
+        const minutes = coord[1].numerator / coord[1].denominator;
+        const seconds = coord[2].numerator / coord[2].denominator;
+        
+        let decimal = degrees + (minutes / 60) + (seconds / 3600);
+        
+        // 根据参考方向调整符号
+        if (ref === "S" || ref === "W") {
+            decimal = -decimal;
+        }
+        
+        return decimal;
+    }
+
+    function parseXMPGPS(xmpData) {
+        // XMP中GPS信息的常见格式
+        // <GPSCoordinates>30.123456,120.654321</GPSCoordinates>
+        // <exif:GPSLatitude>30.123456</exif:GPSLatitude>
+        // <exif:GPSLongitude>120.654321</exif:GPSLongitude>
+        
+        let latitude = null;
+        let longitude = null;
+        
+        // 尝试匹配 GPSCoordinates 格式
+        const coordMatch = xmpData.match(/<GPSCoordinates>([^<]+)<\/GPSCoordinates>/i);
+        if (coordMatch) {
+            const coords = coordMatch[1].split(',');
+            if (coords.length === 2) {
+                latitude = parseFloat(coords[0].trim());
+                longitude = parseFloat(coords[1].trim());
+            }
+        }
+        
+        // 尝试匹配分开的经纬度格式
+        if (latitude === null || longitude === null) {
+            const latMatch = xmpData.match(/<[^>]*GPSLatitude[^>]*>([^<]+)<\/[^>]*>/i);
+            const lonMatch = xmpData.match(/<[^>]*GPSLongitude[^>]*>([^<]+)<\/[^>]*>/i);
+            
+            if (latMatch) latitude = parseFloat(latMatch[1].trim());
+            if (lonMatch) longitude = parseFloat(lonMatch[1].trim());
+        }
+        
+        // � 尝试匹配小米手机的格式
+        if (latitude === null || longitude === null) {
+            const miuiLatMatch = xmpData.match(/<miui:GPSLatitude[^>]*>([^<]+)<\/miui:GPSLatitude>/i);
+            const miuiLonMatch = xmpData.match(/<miui:GPSLongitude[^>]*>([^<]+)<\/miui:GPSLongitude>/i);
+            
+            if (miuiLatMatch) latitude = parseFloat(miuiLatMatch[1].trim());
+            if (miuiLonMatch) longitude = parseFloat(miuiLonMatch[1].trim());
+        }
+        
+        if (latitude !== null && longitude !== null && !isNaN(latitude) && !isNaN(longitude)) {
+            return { latitude, longitude };
+        }
+        
+        return null;
+    }
+
+    function readIFD(dataView, start, littleEndian, tagToFind) {
+        const entries = dataView.getUint16(start, littleEndian);
+        
+        for (let i = 0; i < entries; i++) {
+            const entryOffset = start + 2 + i * 12;
+            const tag = dataView.getUint16(entryOffset, littleEndian);
+            
+            if (tag === tagToFind) {
+                return dataView.getUint32(entryOffset + 8, littleEndian);
+            }
+        }
+        
+        return null;
+    }
+
+    function readGPSData(dataView, start, littleEndian) {
+        const entries = dataView.getUint16(start, littleEndian);
+        let lat = null, latRef = null, lon = null, lonRef = null;
+        
+        console.log(`GPS IFD entries: ${entries}`);
+        
+        for (let i = 0; i < entries; i++) {
+            const entryOffset = start + 2 + i * 12;
+            const tag = dataView.getUint16(entryOffset, littleEndian);
+            const type = dataView.getUint16(entryOffset + 2, littleEndian);
+            const count = dataView.getUint32(entryOffset + 4, littleEndian);
+            const valueOrOffset = dataView.getUint32(entryOffset + 8, littleEndian);
+            
+            console.log(`GPS Tag: 0x${tag.toString(16).padStart(4, '0')}, Type: ${type}, Count: ${count}, Value: 0x${valueOrOffset.toString(16)}`);
+            
+            // 处理有理数类型（5）
+            if (type === 5 && count === 3) {
+                let offset = valueOrOffset;
+                // 如果值可以直接存储在entry中（4字节），则使用entryOffset + 8
+                if (count * 8 <= 4) {
+                    offset = entryOffset + 8;
+                }
+                
+                const numerator1 = dataView.getUint32(offset, littleEndian);
+                const denominator1 = dataView.getUint32(offset + 4, littleEndian);
+                const numerator2 = dataView.getUint32(offset + 8, littleEndian);
+                const denominator2 = dataView.getUint32(offset + 12, littleEndian);
+                const numerator3 = dataView.getUint32(offset + 16, littleEndian);
+                const denominator3 = dataView.getUint32(offset + 20, littleEndian);
+                
+                const values = [
+                    denominator1 !== 0 ? numerator1 / denominator1 : 0,
+                    denominator2 !== 0 ? numerator2 / denominator2 : 0,
+                    denominator3 !== 0 ? numerator3 / denominator3 : 0
+                ];
+                
+                console.log(`GPS Rational: ${values}`);
+                
+                if (tag === 0x0002) {
+                    lat = values;
+                } else if (tag === 0x0004) {
+                    lon = values;
+                }
+            } 
+            // 处理ASCII字符串类型（2）
+            else if (type === 2 && count >= 1) {
+                let offset = valueOrOffset;
+                // 如果值可以直接存储在entry中（4字节），则使用entryOffset + 8
+                if (count <= 4) {
+                    offset = entryOffset + 8;
+                }
+                
+                const value = String.fromCharCode(dataView.getUint8(offset));
+                console.log(`GPS ASCII: ${value}`);
+                
+                if (tag === 0x0001) {
+                    latRef = value;
+                } else if (tag === 0x0003) {
+                    lonRef = value;
+                }
+            }
+        }
+        
+        console.log(`Final GPS - Lat: ${lat}, LatRef: ${latRef}, Lon: ${lon}, LonRef: ${lonRef}`);
+        
+        if (!lat || !latRef || !lon || !lonRef) {
+            console.log('GPS数据不完整');
+            return null;
+        }
+        
+        const latitude = lat[0] + lat[1] / 60 + lat[2] / 3600;
+        const longitude = lon[0] + lon[1] / 60 + lon[2] / 3600;
+        
+        const result = {
+            latitude: latRef === 'S' ? -latitude : latitude,
+            longitude: lonRef === 'W' ? -longitude : longitude
+        };
+        
+        console.log(`GPS Result: ${result.latitude.toFixed(6)}, ${result.longitude.toFixed(6)}`);
+        return result;
+    }
+
+    function addPhotoMarker(latitude, longitude, file) {
+        // 将GPS坐标转换为地形坐标
+        let terrainX, terrainZ;
+        
+        if (window.terrainRealSize && window.terrainRealSize.north !== null) {
+            // 使用DEM的经纬度范围进行精确映射
+            const realSize = window.terrainRealSize;
+            const lonDiff = realSize.east - realSize.west;
+            const latDiff = realSize.north - realSize.south;
+            
+            // 计算归一化坐标（0-1范围）
+            const normalizedX = (longitude - realSize.west) / lonDiff;
+            const normalizedZ = (latitude - realSize.south) / latDiff;
+            
+            // 转换为地形坐标系统（中心点为0,0）
+            terrainX = (normalizedX - 0.5) * realSize.displayWidth;
+            terrainZ = (normalizedZ - 0.5) * realSize.displayHeight;
+            
+            console.log(`GPS坐标: (${latitude.toFixed(6)}, ${longitude.toFixed(6)})`);
+            console.log(`归一化坐标: (${normalizedX.toFixed(3)}, ${normalizedZ.toFixed(3)})`);
+            console.log(`地形坐标: (${terrainX.toFixed(1)}, ${terrainZ.toFixed(1)})`);
+            console.log(`地形尺寸: ${realSize.displayWidth.toFixed(1)} x ${realSize.displayHeight.toFixed(1)}`);
+        } else {
+            // 使用默认映射（假设中心点在120°E, 30°N）
+            terrainX = (longitude - 120) * 100;
+            terrainZ = (latitude - 30) * 100;
+            console.log(`使用默认映射，地形坐标: (${terrainX.toFixed(1)}, ${terrainZ.toFixed(1)})`);
+        }
+        
+        // 读取照片文件并创建缩略图
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const img = new Image();
+            img.onload = function() {
+                // 创建缩略图canvas
+                const thumbSize = 128;
+                const canvas = document.createElement('canvas');
+                canvas.width = thumbSize;
+                canvas.height = thumbSize;
+                const ctx = canvas.getContext('2d');
+                
+                // 计算缩放比例，保持宽高比
+                const scale = Math.min(thumbSize / img.width, thumbSize / img.height);
+                const scaledWidth = img.width * scale;
+                const scaledHeight = img.height * scale;
+                const offsetX = (thumbSize - scaledWidth) / 2;
+                const offsetY = (thumbSize - scaledHeight) / 2;
+                
+                // 绘制缩略图（白色背景）
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, thumbSize, thumbSize);
+                ctx.drawImage(img, offsetX, offsetY, scaledWidth, scaledHeight);
+                
+                // 添加边框
+                ctx.strokeStyle = '#333333';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(0, 0, thumbSize, thumbSize);
+                
+                // 创建纹理
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.needsUpdate = true;
+                
+                // 创建照片标记组 - 使用与点标记相同的样式
+                const markerGroup = new THREE.Group();
+                
+                // 获取地形高度
+                const baseHeight = getTerrainHeight(terrainX, terrainZ);
+                
+                // 使用与 createPointMarker 相同的样式
+                const pinHeight = 6;
+                const pinHeadRadius = 2.5;
+                
+                // 1. 创建标记主体（红色圆柱）
+                const pinBodyGeometry = new THREE.CylinderGeometry(0.8, 0.3, pinHeight, 16);
+                const pinBodyMaterial = new THREE.MeshBasicMaterial({ 
+                    color: 0xff0000,
+                    depthTest: false,
+                    depthWrite: false
+                });
+                const pinBody = new THREE.Mesh(pinBodyGeometry, pinBodyMaterial);
+                pinBody.position.set(0, pinHeight / 2 + 0.5, 0);
+                pinBody.renderOrder = 2;
+                markerGroup.add(pinBody);
+                
+                // 2. 创建标记头部（红色球体）
+                const pinHeadGeometry = new THREE.SphereGeometry(pinHeadRadius, 32, 32);
+                const pinHeadMaterial = new THREE.MeshBasicMaterial({ 
+                    color: 0xff0000,
+                    depthTest: false,
+                    depthWrite: false
+                });
+                const pinHead = new THREE.Mesh(pinHeadGeometry, pinHeadMaterial);
+                pinHead.position.set(0, pinHeight + 0.5, 0);
+                pinHead.renderOrder = 2;
+                markerGroup.add(pinHead);
+                
+                // 3. 创建标记中心（白色球体）
+                const pinCenterGeometry = new THREE.SphereGeometry(1.2, 32, 32);
+                const pinCenterMaterial = new THREE.MeshBasicMaterial({ 
+                    color: 0xffffff,
+                    depthTest: false,
+                    depthWrite: false
+                });
+                const pinCenter = new THREE.Mesh(pinCenterGeometry, pinCenterMaterial);
+                pinCenter.position.set(0, pinHeight + 0.5, 0);
+                pinCenter.renderOrder = 2;
+                markerGroup.add(pinCenter);
+                
+                // 4. 创建阴影
+                const shadowGeometry = new THREE.CircleGeometry(pinHeadRadius * 0.8, 32);
+                const shadowMaterial = new THREE.MeshBasicMaterial({ 
+                    color: 0x000000,
+                    transparent: true,
+                    opacity: 0.3,
+                    depthTest: false,
+                    depthWrite: false
+                });
+                const shadow = new THREE.Mesh(shadowGeometry, shadowMaterial);
+                shadow.position.set(0, 0.1, 0);
+                shadow.rotation.x = -Math.PI / 2;
+                shadow.renderOrder = 1;
+                markerGroup.add(shadow);
+                
+                // 5. 创建照片缩略图（显示在标记旁边）
+                const photoSize = 5;
+                const photoGeometry = new THREE.PlaneGeometry(photoSize, photoSize);
+                const photoMaterial = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    side: THREE.DoubleSide,
+                    transparent: true
+                });
+                const photo = new THREE.Mesh(photoGeometry, photoMaterial);
+                // 照片位于标记顶部中心
+                photo.position.set(0, pinHeight + 2, 0);
+                photo.renderOrder = 3;
+                markerGroup.add(photo);
+
+                // 设置标记组位置
+                markerGroup.position.set(terrainX, baseHeight, terrainZ);
+
+                // 照片始终面向相机
+                function updatePhotoRotation() {
+                    if (photo && camera) {
+                        photo.lookAt(camera.position);
+                    }
+                }
+
+                // 在渲染循环中更新照片旋转
+                const originalAnimate = animate;
+                animate = function() {
+                    updatePhotoRotation();
+                    originalAnimate();
+                };
+                
+                console.log(`标记位置: (${markerGroup.position.x.toFixed(1)}, ${markerGroup.position.y.toFixed(1)}, ${markerGroup.position.z.toFixed(1)})`);
+                
+                // 添加到场景
+                scene.add(markerGroup);
+                
+                // 存储照片数据
+                markerGroup.userData = {
+                    type: 'photo',
+                    file: file,
+                    latitude: latitude,
+                    longitude: longitude
+                };
+                
+                // 添加点击事件
+                markerGroup.userData.onClick = () => {
+                    showPhotoPreview(file);
+                };
+                
+                console.log(`成功添加照片标记: ${file.name}`);
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function getTerrainHeight(x, z) {
+        if (!heightData || !terrainDimensions) return 0;
+        
+        const normalizedX = (x + terrainDimensions.width / 2) / terrainDimensions.width;
+        const normalizedZ = (z + terrainDimensions.height / 2) / terrainDimensions.height;
+        
+        if (normalizedX < 0 || normalizedX > 1 || normalizedZ < 0 || normalizedZ > 1) return 0;
+        
+        const gridX = Math.floor(normalizedX * rawWidth);
+        const gridZ = Math.floor(normalizedZ * rawHeight);
+        
+        if (gridX < 0 || gridX >= rawWidth || gridZ < 0 || gridZ >= rawHeight) return 0;
+        
+        const index = gridZ * rawWidth + gridX;
+        const rawElevation = heightData[index] || 0;
+        
+        // 应用与地形相同的高度缩放系数
+        const heightSliderValue = parseFloat(document.getElementById('height-scale').value);
+        const heightScale = logarithmicTransform(heightSliderValue, 0.01, 30);
+        const isSmooth = document.getElementById('render-mode-toggle').checked;
+        const scaleMultiplier = isSmooth ? 0.5 : 0.3;
+        
+        return rawElevation * scaleMultiplier * heightScale;
+    }
+
+    function showPhotoPreview(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const img = new Image();
+            img.src = e.target.result;
+            img.style.maxWidth = '80vw';
+            img.style.maxHeight = '80vh';
+            img.style.borderRadius = '8px';
+            
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0, 0, 0, 0.9); display: flex;
+                align-items: center; justify-content: center; z-index: 10000;
+            `;
+            
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '关闭';
+            closeBtn.style.cssText = `
+                position: absolute; top: 20px; right: 20px;
+                padding: 10px 20px; background: #3b82f6; color: white;
+                border: none; border-radius: 6px; cursor: pointer;
+                font-size: 14px; font-weight: bold;
+            `;
+            closeBtn.onclick = () => document.body.removeChild(modal);
+            
+            modal.appendChild(img);
+            modal.appendChild(closeBtn);
+            document.body.appendChild(modal);
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) document.body.removeChild(modal);
+            };
+        };
+        reader.readAsDataURL(file);
     }
 
     // 辅助函数：创建方位标记贴图
@@ -4483,6 +5002,13 @@
             const loader = new THREE.TextureLoader();
             loader.load(url, (tex) => {
                 tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                
+                // 设置纹理wrap和repeat以避免偏移
+                tex.wrapS = THREE.ClampToEdgeWrapping;
+                tex.wrapT = THREE.ClampToEdgeWrapping;
+                tex.repeat.set(1, 1);
+                tex.offset.set(0, 0);
+                
                 customTexture = tex;
                 rebuildMaterial();
                 URL.revokeObjectURL(url);
