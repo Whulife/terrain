@@ -487,7 +487,7 @@
         <button class="locate-btn" id="locate-btn" title="定位到当前位置">📍</button>
 
         <!-- UI Controls -->
-        <div class="control-panel p-6 rounded-xl shadow-2xl border border-gray-200" id="main-panel" style="width: 300px;">
+        <div class="control-panel p-4 rounded-xl shadow-2xl border border-gray-200" id="main-panel" style="width: 320px;">
             <div class="panel-header">
                 <h1 class="text-xl font-extrabold text-gray-800 flex items-center">
                     <svg class="w-6 h-6 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"></path></svg>
@@ -498,8 +498,8 @@
 
             <div class="panel-content">
                 <!-- View Toggle -->
-                <div class="mb-6">
-                    <label class="block text-sm font-semibold text-gray-600 mb-2">视图模式</label>
+                <div class="mb-3">
+                    <label class="block text-sm font-semibold text-gray-600 mb-1">视图模式</label>
                     <div class="flex bg-gray-200 p-1 rounded-lg">
                         <button id="btn-2d" class="flex-1 py-1 px-2 rounded-md bg-white shadow-sm text-sm font-medium text-blue-600 transition-all">2D 地图</button>
                         <button id="btn-3d" class="flex-1 py-1 px-2 rounded-md text-sm font-medium text-gray-600 hover:text-blue-600 transition-all">3D 地球</button>
@@ -507,8 +507,8 @@
                 </div>
 
                 <!-- Grid Toggle -->
-                <div class="mb-4">
-                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div class="mb-3">
+                    <div class="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
                         <div class="flex items-center gap-2">
                             <span class="text-lg">🌐</span>
                             <span class="text-sm font-medium text-gray-700">经纬网</span>
@@ -518,8 +518,8 @@
                             <span class="toggle-slider"></span>
                         </label>
                     </div>
-                    <div id="grid-options" class="mt-2 pl-1" style="display: none;">
-                        <div class="flex items-center gap-3 mb-2">
+                    <div id="grid-options" class="mt-1 pl-1" style="display: none;">
+                        <div class="flex items-center gap-2 mb-1">
                             <div class="flex items-center gap-1">
                                 <span class="text-xs text-gray-500">颜色:</span>
                                 <input type="color" id="grid-color" value="#3b82f6" class="w-8 h-6 rounded cursor-pointer border border-gray-300">
@@ -530,13 +530,13 @@
                                 <span id="grid-weight-value" class="text-xs text-gray-600 w-6">0.5</span>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2 mb-2">
+                        <div class="flex items-center gap-2 mb-1">
                             <span class="text-xs text-gray-500">间距:</span>
                             <input type="number" id="grid-spacing" value="10" min="1" max="45" class="w-12 h-6 text-xs border border-gray-300 rounded px-1">
                             <span class="text-xs text-gray-400">度</span>
                         </div>
                     </div>
-                    <div class="pt-2 mt-3 pl-1">
+                    <div class="pt-1 mt-2 pl-1">
                         <div class="flex items-center gap-2">
                             <input type="checkbox" id="show-special-lat" class="w-4 h-4">
                             <span class="text-xs text-gray-600">特殊纬线</span>
@@ -547,8 +547,8 @@
                 </div>
 
                 <!-- China Boundary -->
-                <div class="mb-4">
-                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div class="mb-3">
+                    <div class="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
                         <div class="flex items-center gap-2">
                             <span class="text-lg">🇨🇳</span>
                             <span class="text-sm font-medium text-gray-700">中国行政边界</span>
@@ -561,20 +561,20 @@
                 </div>
 
             <!-- Data Import -->
-            <div class="mb-4">
-                <label class="block text-sm font-semibold text-gray-600 mb-2">导入空间数据</label>
+            <div class="mb-3">
+                <label class="block text-sm font-semibold text-gray-600 mb-1">导入空间数据</label>
                 <div class="relative group">
                     <input type="file" id="file-input" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept=".kml,.kmz,.geojson,.json,.zip">
-                    <div class="w-full border-2 border-dashed border-blue-400 rounded-lg p-4 text-center group-hover:bg-blue-50 transition-colors">
-                        <svg class="w-8 h-8 mx-auto text-blue-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                    <div class="w-full border-2 border-dashed border-blue-400 rounded-lg p-3 text-center group-hover:bg-blue-50 transition-colors">
+                        <svg class="w-6 h-6 mx-auto text-blue-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
                         <span class="text-xs text-gray-500">支持 KML, KMZ, GeoJSON, SHP (.zip)</span>
                     </div>
                 </div>
             </div>
 
             <!-- Layer List -->
-            <div class="mb-4">
-                <label class="block text-sm font-semibold text-gray-600 mb-2">图层管理</label>
+            <div class="mb-3">
+                <label class="block text-sm font-semibold text-gray-600 mb-1">图层管理</label>
                 <div class="flex gap-2 mb-2">
                     <button onclick="createNewLayer()" 
                             class="flex-1 bg-blue-500 hover:bg-blue-600 text-white text-xs py-2 px-3 rounded-lg transition-colors">
@@ -588,7 +588,7 @@
                 
                 <!-- Edit Tools -->
                 <div class="mb-2">
-                    <label class="block text-sm font-semibold text-gray-600 mb-2">编辑工具</label>
+                    <label class="block text-sm font-semibold text-gray-600 mb-1">编辑工具</label>
                     <div class="flex gap-2 mb-2">
                         <button id="tool-pointer" onclick="setEditMode('pointer')" 
                                 class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs py-2 px-2 rounded-lg transition-colors active-tool">
@@ -1048,12 +1048,24 @@
                 for (let lat = -90; lat <= 90; lat += 5) {
                     coords.push([lat, lon]);
                 }
-                gridLines.push(L.polyline(coords, { 
-                    color: gridColor, 
-                    weight: gridWeight, 
-                    opacity: 0.5,
-                    dashArray: '2, 4'
-                }));
+                const isPrimeMeridian = Math.abs(lon) < 0.1;
+                const isDateLine = Math.abs(lon - 180) < 0.1 || Math.abs(lon + 180) < 0.1;
+                
+                if (isPrimeMeridian || isDateLine) {
+                    gridLines.push(L.polyline(coords, { 
+                        color: gridColor, 
+                        weight: gridWeight * 2, 
+                        opacity: 0.8,
+                        dashArray: null
+                    }));
+                } else {
+                    gridLines.push(L.polyline(coords, { 
+                        color: gridColor, 
+                        weight: gridWeight, 
+                        opacity: 0.5,
+                        dashArray: '2, 4'
+                    }));
+                }
             }
             
             leafletGridLayer = L.layerGroup(gridLines);
@@ -1108,9 +1120,15 @@
                 transparent: true, 
                 opacity: 0.4 
             });
+            const thickMaterial = new THREE.LineBasicMaterial({ 
+                color: colorHex, 
+                transparent: true, 
+                opacity: 0.8 
+            });
             
             const radius = EARTH_RADIUS + 0.005;
             const spacing = gridSpacing;
+            const lineWidth = Math.max(1, Math.floor(gridWeight * 2));
             
             for (let lat = -80; lat <= 80; lat += spacing) {
                 const points = [];
@@ -1139,8 +1157,33 @@
                     points.push(new THREE.Vector3(x, y, z));
                 }
                 const geometry = new THREE.BufferGeometry().setFromPoints(points);
-                const line = new THREE.Line(geometry, gridMaterial);
-                threeGridGroup.add(line);
+                const isPrimeMeridian = Math.abs(lon) < 0.1;
+                const isDateLine = Math.abs(lon - 180) < 0.1 || Math.abs(lon + 180) < 0.1;
+                
+                if (isPrimeMeridian || isDateLine) {
+                    const line = new THREE.Line(geometry, thickMaterial);
+                    threeGridGroup.add(line);
+                } else {
+                    const line = new THREE.Line(geometry, gridMaterial);
+                    threeGridGroup.add(line);
+                    
+                    if (lineWidth > 1) {
+                        for (let i = 1; i < lineWidth; i++) {
+                            const offsetRadius = radius + (i * 0.001);
+                            const offsetPoints = [];
+                            for (let lat = -90; lat <= 90; lat += 2) {
+                                const phi = (90 - lat) * (Math.PI / 180);
+                                const x = -(offsetRadius * Math.sin(phi) * Math.cos(theta));
+                                const z = (offsetRadius * Math.sin(phi) * Math.sin(theta));
+                                const y = (offsetRadius * Math.cos(phi));
+                                offsetPoints.push(new THREE.Vector3(x, y, z));
+                            }
+                            const offsetGeometry = new THREE.BufferGeometry().setFromPoints(offsetPoints);
+                            const offsetLine = new THREE.Line(offsetGeometry, gridMaterial);
+                            threeGridGroup.add(offsetLine);
+                        }
+                    }
+                }
             }
             
             if (gridVisible) {
@@ -1372,6 +1415,69 @@
             return new THREE.Vector3(x, y, z);
         }
 
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const phi1 = lat1 * Math.PI / 180;
+            const phi2 = lat2 * Math.PI / 180;
+            const deltaPhi = (lat2 - lat1) * Math.PI / 180;
+            const deltaLambda = (lon2 - lon1) * Math.PI / 180;
+
+            const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                      Math.cos(phi1) * Math.cos(phi2) *
+                      Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+            return R * c;
+        }
+
+        function calculateGreatCirclePoints(lat1, lon1, lat2, lon2, numSegments) {
+            const points = [];
+            const phi1 = (90 - lat1) * (Math.PI / 180);
+            const theta1 = (lon1 + 90) * (Math.PI / 180);
+            const phi2 = (90 - lat2) * (Math.PI / 180);
+            const theta2 = (lon2 + 90) * (Math.PI / 180);
+
+            const x1 = -Math.sin(phi1) * Math.cos(theta1);
+            const y1 = Math.cos(phi1);
+            const z1 = Math.sin(phi1) * Math.sin(theta1);
+
+            const x2 = -Math.sin(phi2) * Math.cos(theta2);
+            const y2 = Math.cos(phi2);
+            const z2 = Math.sin(phi2) * Math.sin(theta2);
+
+            const dot = x1 * x2 + y1 * y2 + z1 * z2;
+            const omega = Math.acos(Math.max(-1, Math.min(1, dot)));
+
+            for (let i = 0; i <= numSegments; i++) {
+                const t = i / numSegments;
+                let x, y, z;
+
+                if (omega < 0.0001) {
+                    x = x1;
+                    y = y1;
+                    z = z1;
+                } else {
+                    const sinOmega = Math.sin(omega);
+                    const sinTomega = Math.sin(t * omega);
+                    const sin1Tomega = Math.sin((1 - t) * omega);
+
+                    x = (sin1Tomega * x1 + sinTomega * x2) / sinOmega;
+                    y = (sin1Tomega * y1 + sinTomega * y2) / sinOmega;
+                    z = (sin1Tomega * z1 + sinTomega * z2) / sinOmega;
+                }
+
+                const phi = Math.acos(y);
+                const theta = Math.atan2(z, -x);
+
+                const lat = 90 - (phi * 180 / Math.PI);
+                const lon = (theta * 180 / Math.PI) - 90;
+
+                points.push({ lat, lon });
+            }
+
+            return points;
+        }
+
         function renderGeoJSONToThree(layer) {
             if (!threeScene || !layer.geojson) return;
 
@@ -1415,19 +1521,40 @@
                     maxLon = Math.max(maxLon, coords[0]);
                 } else if (geometry.type === 'LineString' || geometry.type === 'MultiLineString') {
                     const coords = geometry.type === 'LineString' ? geometry.coordinates : geometry.coordinates[0];
-                    const points = coords.map(c => {
-                        minLat = Math.min(minLat, c[1]);
-                        maxLat = Math.max(maxLat, c[1]);
-                        minLon = Math.min(minLon, c[0]);
-                        maxLon = Math.max(maxLon, c[0]);
-                        return latLonToVector3(c[1], c[0], EARTH_RADIUS + 0.05);
-                    });
-                    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+                    
+                    const allPoints = [];
+                    for (let i = 0; i < coords.length - 1; i++) {
+                        const lat1 = coords[i][1];
+                        const lon1 = coords[i][0];
+                        const lat2 = coords[i + 1][1];
+                        const lon2 = coords[i + 1][0];
+
+                        minLat = Math.min(minLat, lat1, lat2);
+                        maxLat = Math.max(maxLat, lat1, lat2);
+                        minLon = Math.min(minLon, lon1, lon2);
+                        maxLon = Math.max(maxLon, lon1, lon2);
+
+                        const distance = calculateDistance(lat1, lon1, lat2, lon2);
+                        const numSegments = Math.max(1, Math.min(50, Math.floor(distance / 100)));
+
+                        if (numSegments > 1) {
+                            const greatCirclePoints = calculateGreatCirclePoints(lat1, lon1, lat2, lon2, numSegments);
+                            greatCirclePoints.forEach(point => {
+                                allPoints.push(latLonToVector3(point.lat, point.lon, EARTH_RADIUS + 0.05));
+                            });
+                        } else {
+                            allPoints.push(latLonToVector3(lat1, lon1, EARTH_RADIUS + 0.05));
+                        }
+                    }
+                    allPoints.push(latLonToVector3(coords[coords.length - 1][1], coords[coords.length - 1][0], EARTH_RADIUS + 0.05));
+                    
+                    const lineGeo = new THREE.BufferGeometry().setFromPoints(allPoints);
                     const line = new THREE.Line(lineGeo, material);
                     layer.threeGroup.add(line);
                     
                     const smallDotMat = new THREE.MeshBasicMaterial({ color: color });
-                    points.forEach(pos => {
+                    coords.forEach(c => {
+                        const pos = latLonToVector3(c[1], c[0], EARTH_RADIUS + 0.05);
                         const smallDotGeo = new THREE.SphereGeometry(0.02, 8, 8);
                         const smallDot = new THREE.Mesh(smallDotGeo, smallDotMat);
                         smallDot.position.copy(pos);
@@ -1435,31 +1562,51 @@
                     });
                     
                     featureCount++;
-                    totalPoints += points.length;
+                    totalPoints += allPoints.length;
                 } else if (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon') {
                     const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
                     polygons.forEach(polygon => {
                         polygon.forEach(ring => {
-                            const points = ring.map(c => {
-                                minLat = Math.min(minLat, c[1]);
-                                maxLat = Math.max(maxLat, c[1]);
-                                minLon = Math.min(minLon, c[0]);
-                                maxLon = Math.max(maxLon, c[0]);
-                                return latLonToVector3(c[1], c[0], EARTH_RADIUS + 0.05);
-                            });
-                            const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+                            const allPoints = [];
+                            for (let i = 0; i < ring.length - 1; i++) {
+                                const lat1 = ring[i][1];
+                                const lon1 = ring[i][0];
+                                const lat2 = ring[i + 1][1];
+                                const lon2 = ring[i + 1][0];
+
+                                minLat = Math.min(minLat, lat1, lat2);
+                                maxLat = Math.max(maxLat, lat1, lat2);
+                                minLon = Math.min(minLon, lon1, lon2);
+                                maxLon = Math.max(maxLon, lon1, lon2);
+
+                                const distance = calculateDistance(lat1, lon1, lat2, lon2);
+                                const numSegments = Math.max(1, Math.min(50, Math.floor(distance / 100)));
+
+                                if (numSegments > 1) {
+                                    const greatCirclePoints = calculateGreatCirclePoints(lat1, lon1, lat2, lon2, numSegments);
+                                    greatCirclePoints.forEach(point => {
+                                        allPoints.push(latLonToVector3(point.lat, point.lon, EARTH_RADIUS + 0.05));
+                                    });
+                                } else {
+                                    allPoints.push(latLonToVector3(lat1, lon1, EARTH_RADIUS + 0.05));
+                                }
+                            }
+                            allPoints.push(latLonToVector3(ring[ring.length - 1][1], ring[ring.length - 1][0], EARTH_RADIUS + 0.05));
+                            
+                            const lineGeo = new THREE.BufferGeometry().setFromPoints(allPoints);
                             const line = new THREE.Line(lineGeo, material);
                             layer.threeGroup.add(line);
                             
                             const smallDotMat = new THREE.MeshBasicMaterial({ color: color });
-                            points.forEach(pos => {
+                            ring.forEach(c => {
+                                const pos = latLonToVector3(c[1], c[0], EARTH_RADIUS + 0.05);
                                 const smallDotGeo = new THREE.SphereGeometry(0.02, 8, 8);
                                 const smallDot = new THREE.Mesh(smallDotGeo, smallDotMat);
                                 smallDot.position.copy(pos);
                                 layer.threeGroup.add(smallDot);
                             });
                             
-                            totalPoints += points.length;
+                            totalPoints += allPoints.length;
                         });
                     });
                     featureCount++;
@@ -2197,6 +2344,15 @@
             const latlonIndicator = document.getElementById('latlon-indicator');
             if (latlonIndicator) {
                 latlonIndicator.style.display = 'none';
+            }
+            
+            const searchBox = document.getElementById('search-box');
+            if (searchBox) {
+                if (mode === '3d') {
+                    searchBox.style.display = 'none';
+                } else {
+                    searchBox.style.display = 'block';
+                }
             }
             
             if (gridVisible) {
