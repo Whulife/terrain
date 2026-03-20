@@ -100,10 +100,17 @@
                 <h1 class="text-2xl font-bold text-slate-800 italic">DEM & Imagery Downloader</h1>
                 <p class="text-slate-500 text-sm">直接下载 DEM 并同步获取区域卫星影像</p>
             </div>
-            <div class="flex items-center gap-2">
-                <input type="password" id="api-key" placeholder="输入 API Key (留空使用默认)" 
-                       class="px-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64">
-                <a href="https://opentopography.org/developers" target="_blank" class="text-xs text-blue-500 hover:underline">获取 Key</a>
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1.5">
+                    <input type="password" id="api-key" placeholder="OpenTopography Key (可选)" 
+                           class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-54">
+                    <a href="https://opentopography.org/developers" target="_blank" class="text-xs text-blue-500 hover:underline whitespace-nowrap">获取 OpenTopography Key</a>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <input type="password" id="baidu-api-key" placeholder="百度地图 Key (可选)" 
+                           class="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none w-54">
+                    <a href="https://lbsyun.baidu.com/apiconsole/key" target="_blank" class="text-xs text-indigo-500 hover:underline whitespace-nowrap">获取 百度地图 Key</a>
+                </div>
             </div>
         </header>
 
@@ -255,7 +262,7 @@
     </div>
 
     <!-- 地图下载类型选择对话框 -->
-    <div id="map-download-modal" class="fixed inset-0 bg-black/50 z-[2000] hidden flex items-center justify-center">
+    <div id="map-download-modal" class="fixed inset-0 bg-black/50 z-[10001] hidden flex items-center justify-center">
         <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h3 class="text-lg font-bold text-slate-800 mb-4">选择要下载的地图类型</h3>
             
@@ -357,6 +364,17 @@
 
         apiKeyInput.value = localStorage.getItem('ot_api_key') || '';
         apiKeyInput.addEventListener('change', () => localStorage.setItem('ot_api_key', apiKeyInput.value));
+
+        // 百度API Key处理
+        const baiduApiKeyInput = document.getElementById('baidu-api-key');
+        const DEFAULT_BAIDU_KEY = '2P3BS8kb9vg0yGvXpECPNoYiC7bii7O1';
+        baiduApiKeyInput.value = localStorage.getItem('baidu_api_key') || '';
+        baiduApiKeyInput.addEventListener('change', () => localStorage.setItem('baidu_api_key', baiduApiKeyInput.value));
+
+        // 获取百度API Key（用户输入或默认）
+        function getBaiduApiKey() {
+            return baiduApiKeyInput.value.trim() || DEFAULT_BAIDU_KEY;
+        }
 
         // DEM数据集选择变化时更新估算
         datasetSelect.addEventListener('change', () => {
@@ -481,9 +499,6 @@
         let searchMarker = null;
         const locationSearchInput = document.getElementById('location-search');
         const searchBtn = document.getElementById('search-btn');
-        
-        // 百度地图API Key
-        const BAIDU_AK = '2P3BS8kb9vg0yGvXpECPNoYiC7bii7O1';
 
         // 百度坐标转WGS84坐标
         function bd09ToWgs84(bd_lon, bd_lat) {
@@ -589,7 +604,7 @@
             };
 
             const script = document.createElement('script');
-            script.src = `https://api.map.baidu.com/place/v2/search?query=${encodeURIComponent(query)}&region=全国&output=json&ak=${BAIDU_AK}&callback=${callbackName}`;
+            script.src = `https://api.map.baidu.com/place/v2/search?query=${encodeURIComponent(query)}&region=全国&output=json&ak=${getBaiduApiKey()}&callback=${callbackName}`;
             script.onerror = function() {
                 alert('搜索失败，请检查网络连接');
                 delete window[callbackName];
@@ -651,6 +666,29 @@
                     }
                     // 设置标志表示这是框选缩放模式
                     window.isZoomAreaMode = true;
+                };
+                
+                // 坐标标记按钮
+                const coordMarkBtn = L.DomUtil.create('button', 'fullscreen-btn', container);
+                coordMarkBtn.innerHTML = '📍';
+                coordMarkBtn.title = '点击地图标记坐标';
+                coordMarkBtn.id = 'coord-mark-btn';
+                coordMarkBtn.onclick = function(e) {
+                    L.DomEvent.stopPropagation(e);
+                    L.DomEvent.preventDefault(e);
+                    window.isCoordMarkMode = !window.isCoordMarkMode;
+                    if (window.isCoordMarkMode) {
+                        coordMarkBtn.style.background = 'rgba(99, 102, 241, 0.3)';
+                        map.getContainer().style.cursor = 'crosshair';
+                    } else {
+                        coordMarkBtn.style.background = 'rgba(255, 255, 255, 0.9)';
+                        map.getContainer().style.cursor = '';
+                        // 清除坐标标记
+                        if (window.coordinateMarker) {
+                            map.removeLayer(window.coordinateMarker);
+                            window.coordinateMarker = null;
+                        }
+                    }
                 };
                 
                 return container;
@@ -758,6 +796,121 @@
             selectedBounds = null;
         });
 
+        // 点击地图标记坐标功能
+        let coordinateMarker = null;
+        let coordinatePopup = null;
+
+        map.on('click', function(e) {
+            if (!window.isCoordMarkMode) return;
+
+            const lat = e.latlng.lat;
+            const lng = e.latlng.lng;
+
+            // WGS84坐标 (EPSG:4326)
+            const wgs84Lat = lat.toFixed(6);
+            const wgs84Lng = lng.toFixed(6);
+
+            // 转换为Web Mercator坐标 (EPSG:3857)
+            const earthRadius = 6378137;
+            const x3857 = lng * Math.PI / 180 * earthRadius;
+            const y3857 = earthRadius / 2 * Math.log((1 + Math.sin(lat * Math.PI / 180)) / (1 - Math.sin(lat * Math.PI / 180)));
+            const coord3857X = x3857.toFixed(2);
+            const coord3857Y = y3857.toFixed(2);
+
+            // 移除之前的标记
+            if (coordinateMarker) {
+                map.removeLayer(coordinateMarker);
+            }
+
+            // 创建自定义图标
+            const customIcon = L.divIcon({
+                className: 'coordinate-marker',
+                html: `<div style="
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    width: 24px;
+                    height: 24px;
+                    border-radius: 50% 50% 50% 0;
+                    transform: rotate(-45deg);
+                    border: 3px solid white;
+                    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                "></div>`,
+                iconSize: [24, 24],
+                iconAnchor: [12, 24],
+                popupAnchor: [0, -24]
+            });
+
+            // 添加新标记
+            coordinateMarker = L.marker([lat, lng], { icon: customIcon }).addTo(map);
+            window.coordinateMarker = coordinateMarker;
+
+            // 创建弹出框内容
+            const popupContent = `
+                <div style="font-family: system-ui, -apple-system, sans-serif; min-width: 220px;">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 8px; color: #4f46e5;">
+                        📍 坐标信息
+                    </div>
+                    <div style="background: #f1f5f9; padding: 8px; border-radius: 6px; margin-bottom: 8px;">
+                        <div style="font-size: 11px; color: #64748b; margin-bottom: 4px;">WGS84 (EPSG:4326)</div>
+                        <div style="font-size: 13px; font-family: monospace;">
+                            <span style="color: #4f46e5;">纬度:</span> ${wgs84Lat}°<br>
+                            <span style="color: #4f46e5;">经度:</span> ${wgs84Lng}°
+                        </div>
+                    </div>
+                    <div style="background: #f1f5f9; padding: 8px; border-radius: 6px; margin-bottom: 8px;">
+                        <div style="font-size: 11px; color: #64748b; margin-bottom: 4px;">Web Mercator (EPSG:3857)</div>
+                        <div style="font-size: 13px; font-family: monospace;">
+                            <span style="color: #7c3aed;">X:</span> ${coord3857X} m<br>
+                            <span style="color: #7c3aed;">Y:</span> ${coord3857Y} m
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 4px;">
+                        <button onclick="copyCoordinate('wgs84')" style="
+                            flex: 1;
+                            padding: 6px 8px;
+                            background: #4f46e5;
+                            color: white;
+                            border: none;
+                            border-radius: 4px;
+                            font-size: 11px;
+                            cursor: pointer;
+                        ">复制WGS84</button>
+                        <button onclick="copyCoordinate('3857')" style="
+                            flex: 1;
+                            padding: 6px 8px;
+                            background: #7c3aed;
+                            color: white;
+                            border: none;
+                            border-radius: 4px;
+                            font-size: 11px;
+                            cursor: pointer;
+                        ">复制3857</button>
+                    </div>
+                </div>
+            `;
+
+            coordinateMarker.bindPopup(popupContent, {
+                maxWidth: 280,
+                className: 'coordinate-popup'
+            }).openPopup();
+
+            // 存储坐标供复制使用
+            window.currentCoordinate = {
+                wgs84: `${wgs84Lat}, ${wgs84Lng}`,
+                epsg3857: `${coord3857X}, ${coord3857Y}`
+            };
+        });
+
+        // 复制坐标函数
+        window.copyCoordinate = function(type) {
+            if (!window.currentCoordinate) return;
+            const text = type === 'wgs84' ? window.currentCoordinate.wgs84 : window.currentCoordinate.epsg3857;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('已复制: ' + text);
+            }).catch(err => {
+                console.error('复制失败:', err);
+            });
+        };
+
         function updateUI(bounds) {
             selectedBounds = bounds;
             const w = bounds.getWest(), s = bounds.getSouth(), e = bounds.getEast(), n = bounds.getNorth();
@@ -818,11 +971,26 @@
                 const originalZoom = map.getZoom();
                 const originalCenter = map.getCenter();
 
+                // 保存选定的地理范围（经纬度），确保所有层级使用相同的地理范围
+                const selectedGeoBounds = selectedBounds ? {
+                    north: selectedBounds.getNorth(),
+                    south: selectedBounds.getSouth(),
+                    east: selectedBounds.getEast(),
+                    west: selectedBounds.getWest()
+                } : null;
+
                 const prepareView = () => {
                     return new Promise((res) => {
                         if (targetZoom !== 'current') {
                             map.once('moveend', () => setTimeout(res, 1000)); 
-                            map.setView(selectedBounds.getCenter(), parseInt(targetZoom), { animate: false });
+                            // 使用保存的地理范围中心点，确保所有层级使用相同的地理范围
+                            if (selectedGeoBounds) {
+                                const centerLat = (selectedGeoBounds.north + selectedGeoBounds.south) / 2;
+                                const centerLng = (selectedGeoBounds.east + selectedGeoBounds.west) / 2;
+                                map.setView([centerLat, centerLng], parseInt(targetZoom), { animate: false });
+                            } else {
+                                map.setView(selectedBounds.getCenter(), parseInt(targetZoom), { animate: false });
+                            }
                         } else {
                             setTimeout(res, 300);
                         }
@@ -837,8 +1005,13 @@
                             return;
                         }
                         
-                        const nwPoint = map.latLngToContainerPoint(selectedBounds.getNorthWest());
-                        const sePoint = map.latLngToContainerPoint(selectedBounds.getSouthEast());
+                        // 使用保存的地理范围计算屏幕坐标，确保所有层级使用相同的地理范围
+                        const boundsToUse = selectedGeoBounds ? 
+                            L.latLngBounds([selectedGeoBounds.south, selectedGeoBounds.west], [selectedGeoBounds.north, selectedGeoBounds.east]) :
+                            selectedBounds;
+                        
+                        const nwPoint = map.latLngToContainerPoint(boundsToUse.getNorthWest());
+                        const sePoint = map.latLngToContainerPoint(boundsToUse.getSouthEast());
                         
                         let x = Math.round(nwPoint.x);
                         let y = Math.round(nwPoint.y);
@@ -1022,6 +1195,14 @@
                 const downloadLayerType = layerType || currentMapLayer;
                 const maxZoom = mapMaxZoom[downloadLayerType] || 19;
 
+                // 保存选定的地理范围（经纬度），确保所有层级使用相同的地理范围
+                const selectedGeoBounds = selectedBounds ? {
+                    north: selectedBounds.getNorth(),
+                    south: selectedBounds.getSouth(),
+                    east: selectedBounds.getEast(),
+                    west: selectedBounds.getWest()
+                } : null;
+
                 // 如果指定了图层类型，切换到该图层并显示名称
                 if (layerType && layerType !== currentMapLayer) {
                     switchMapLayer(layerType);
@@ -1070,7 +1251,14 @@
                     return new Promise((res) => {
                         if (actualZoom !== 'current') {
                             map.once('moveend', () => setTimeout(res, 1000));
-                            map.setView(selectedBounds.getCenter(), parseInt(actualZoom), { animate: false });
+                            // 使用保存的地理范围中心点，确保所有层级使用相同的地理范围
+                            if (selectedGeoBounds) {
+                                const centerLat = (selectedGeoBounds.north + selectedGeoBounds.south) / 2;
+                                const centerLng = (selectedGeoBounds.east + selectedGeoBounds.west) / 2;
+                                map.setView([centerLat, centerLng], parseInt(actualZoom), { animate: false });
+                            } else {
+                                map.setView(selectedBounds.getCenter(), parseInt(actualZoom), { animate: false });
+                            }
                         } else {
                             setTimeout(res, 300);
                         }
@@ -1093,8 +1281,13 @@
                             return;
                         }
 
-                        const nwPoint = map.latLngToContainerPoint(selectedBounds.getNorthWest());
-                        const sePoint = map.latLngToContainerPoint(selectedBounds.getSouthEast());
+                        // 使用保存的地理范围计算屏幕坐标，确保所有层级使用相同的地理范围
+                        const boundsToUse = selectedGeoBounds ? 
+                            L.latLngBounds([selectedGeoBounds.south, selectedGeoBounds.west], [selectedGeoBounds.north, selectedGeoBounds.east]) :
+                            selectedBounds;
+                        
+                        const nwPoint = map.latLngToContainerPoint(boundsToUse.getNorthWest());
+                        const sePoint = map.latLngToContainerPoint(boundsToUse.getSouthEast());
 
                         let x = Math.round(nwPoint.x);
                         let y = Math.round(nwPoint.y);
@@ -1418,7 +1611,7 @@
                     
                     const handleConfirm = async () => {
                         // 在用户点击确认时立即打开新窗口（必须在用户点击事件中同步执行）
-                        const newWindow = window.open('地形模拟.html?autoLoad=pending', '_blank');
+                        const newWindow = window.open('地形模拟 9图层版自动打开.html?autoLoad=pending', '_blank');
                         
                         modal.classList.add('hidden');
                         confirmBtn.removeEventListener('click', handleConfirm);
@@ -1440,7 +1633,7 @@
                 });
             } else {
                 // 不需要选择图层，直接打开新窗口
-                const newWindow = window.open('地形模拟.html?autoLoad=pending', '_blank');
+                const newWindow = window.open('地形模拟 9图层版自动打开.html?autoLoad=pending', '_blank');
                 await performDownloadAndOpen(key, baseFilename, w, s, e, n, demType, url, newWindow);
             }
         };
